@@ -1,21 +1,174 @@
 #!/usr/bin/env python3
 """
 =============================================================================
-VilcoSystem - Motor de Base de Datos para Gestión Técnica y Documental
+VilcoSystem - Motor de Base de Datos Híbrido (SQLite Local + Turso libSQL Cloud)
 Manejo de Solicitudes, Jerarquías, Bitácora de Queries y Documentos
+Arquitectura: LibSQLConnectionWrapper + LibSQLRow para compatibilidad total
 =============================================================================
 """
 
 import os
 import sqlite3
 import datetime
+import logging
 from typing import List, Dict, Any, Optional
 
+logger = logging.getLogger("VilcoVoiceAssistant.Database")
+
 DB_FILE = os.getenv("DATABASE_FILE", "tareas_vilcosystem.db")
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 
 
-def get_db_connection() -> sqlite3.Connection:
-    """Retorna una conexión a SQLite con WAL y foreign keys activadas."""
+# =============================================================================
+# Wrapper de Compatibilidad LibSQLRow para Turso
+# =============================================================================
+class LibSQLRow(dict):
+    """Fila compatible con acceso por nombre de columna, índice numérico y dict(row)."""
+    def __init__(self, cursor_description, row_values):
+        col_names = [col[0] for col in cursor_description] if cursor_description else []
+        self._values = tuple(row_values)
+        super().__init__(zip(col_names, row_values))
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+class LibSQLCursorWrapper:
+    """Cursor envoltorio para adaptar tuplas crudas de libSQL a LibSQLRow."""
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, sql, params=()):
+        self._cursor.execute(sql, params)
+        return self
+
+    def executemany(self, sql, seq_of_params):
+        self._cursor.executemany(sql, seq_of_params)
+        return self
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        if isinstance(row, (dict, LibSQLRow)):
+            return row
+        return LibSQLRow(self._cursor.description, row)
+
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        if not rows:
+            return []
+        if isinstance(rows[0], (dict, LibSQLRow)):
+            return rows
+        desc = self._cursor.description
+        return [LibSQLRow(desc, r) for r in rows]
+
+    def fetchmany(self, size=None):
+        rows = self._cursor.fetchmany(size) if size else self._cursor.fetchmany()
+        if not rows:
+            return []
+        desc = self._cursor.description
+        return [LibSQLRow(desc, r) for r in rows]
+
+    @property
+    def lastrowid(self):
+        return getattr(self._cursor, 'lastrowid', None)
+
+    @property
+    def rowcount(self):
+        return getattr(self._cursor, 'rowcount', -1)
+
+    @property
+    def description(self):
+        return self._cursor.description
+
+    def close(self):
+        return self._cursor.close()
+
+    def __iter__(self):
+        while True:
+            row = self.fetchone()
+            if row is None:
+                break
+            yield row
+
+
+class LibSQLConnectionWrapper:
+    """Envoltorio de conexión a Turso para gestionar cursores compatibles y contexto."""
+    def __init__(self, conn):
+        self._conn = conn
+
+    def cursor(self):
+        return LibSQLCursorWrapper(self._conn.cursor())
+
+    def execute(self, sql, params=()):
+        cur = self.cursor()
+        cur.execute(sql, params)
+        return cur
+
+    def executemany(self, sql, seq_of_params):
+        cur = self.cursor()
+        cur.executemany(sql, seq_of_params)
+        return cur
+
+    def executescript(self, script):
+        for stmt in script.split(';'):
+            stmt_clean = stmt.strip()
+            if stmt_clean:
+                self.execute(stmt_clean)
+        return self
+
+    def commit(self):
+        return self._conn.commit()
+
+    def rollback(self):
+        return self._conn.rollback()
+
+    def close(self):
+        return self._conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            self.rollback()
+        else:
+            self.commit()
+
+
+# =============================================================================
+# Gestor de Conexiones Híbridas
+# =============================================================================
+def get_db_connection():
+    """
+    Retorna conexión activa:
+    1. Si TURSO_DATABASE_URL y TURSO_AUTH_TOKEN existen: Conecta a Turso Cloud.
+    2. Si fallan o no existen: Fallback defensivo a SQLite Local (tareas_vilcosystem.db).
+    """
+    if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
+        try:
+            import libsql
+            db_url = TURSO_DATABASE_URL.strip()
+            if db_url.lower().startswith('libsql://'):
+                db_url = 'libsql://' + db_url[9:]
+            
+            auth_token = TURSO_AUTH_TOKEN.strip()
+            if auth_token.startswith('EyJ'):
+                auth_token = 'eyJ' + auth_token[3:]
+
+            raw_conn = libsql.connect(
+                database=db_url,
+                auth_token=auth_token
+            )
+            return LibSQLConnectionWrapper(raw_conn)
+        except Exception as e:
+            logger.warning(f"Error conectando a Turso Cloud ({e}). Fallback a SQLite local.")
+
+    # Conexión local estándar SQLite
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 30000;")
@@ -25,49 +178,53 @@ def get_db_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Inicializa las tablas relacionales de la base de datos."""
-    with get_db_connection() as conn:
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS solicitudes_tareas (
-            id TEXT PRIMARY KEY,
-            titulo TEXT NOT NULL,
-            solicitante TEXT NOT NULL,
-            cargo_solicitante TEXT NOT NULL,
-            area TEXT NOT NULL,
-            descripcion TEXT NOT NULL,
-            prioridad TEXT CHECK(prioridad IN ('URGENTE', 'ALTA', 'MEDIA', 'BAJA')),
-            criticidad TEXT CHECK(criticidad IN ('CRITICA', 'ALTA', 'MODERADA', 'LEVE')),
-            justificacion_ia TEXT,
-            estado TEXT CHECK(estado IN ('PENDIENTE', 'EN_PROCESO', 'BLOQUEADO', 'REVISION', 'COMPLETADO')) DEFAULT 'PENDIENTE',
-            porcentaje_avance INTEGER DEFAULT 0,
-            fecha_limite TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            completed_at TIMESTAMP
-        );
+    """Inicializa las tablas relacionales de la base de datos de forma idempotente."""
+    try:
+        with get_db_connection() as conn:
+            conn.executescript("""
+            CREATE TABLE IF NOT EXISTS solicitudes_tareas (
+                id TEXT PRIMARY KEY,
+                titulo TEXT NOT NULL,
+                solicitante TEXT NOT NULL,
+                cargo_solicitante TEXT NOT NULL,
+                area TEXT NOT NULL,
+                descripcion TEXT NOT NULL,
+                prioridad TEXT CHECK(prioridad IN ('URGENTE', 'ALTA', 'MEDIA', 'BAJA')),
+                criticidad TEXT CHECK(criticidad IN ('CRITICA', 'ALTA', 'MODERADA', 'LEVE')),
+                justificacion_ia TEXT,
+                estado TEXT CHECK(estado IN ('PENDIENTE', 'EN_PROCESO', 'BLOQUEADO', 'REVISION', 'COMPLETADO')) DEFAULT 'PENDIENTE',
+                porcentaje_avance INTEGER DEFAULT 0,
+                fecha_limite TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP
+            );
 
-        CREATE TABLE IF NOT EXISTS bitacora_avance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tarea_id TEXT NOT NULL,
-            comentario TEXT NOT NULL,
-            query_sql TEXT,
-            doc_referencia TEXT,
-            porcentaje INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (tarea_id) REFERENCES solicitudes_tareas(id) ON DELETE CASCADE
-        );
+            CREATE TABLE IF NOT EXISTS bitacora_avance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tarea_id TEXT NOT NULL,
+                comentario TEXT NOT NULL,
+                query_sql TEXT,
+                doc_referencia TEXT,
+                porcentaje INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (tarea_id) REFERENCES solicitudes_tareas(id) ON DELETE CASCADE
+            );
 
-        CREATE TABLE IF NOT EXISTS documentos_tareas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tarea_id TEXT NOT NULL,
-            nombre_archivo TEXT NOT NULL,
-            tipo_archivo TEXT NOT NULL,
-            tamano_bytes INTEGER,
-            texto_extraido TEXT NOT NULL,
-            resumen TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (tarea_id) REFERENCES solicitudes_tareas(id) ON DELETE CASCADE
-        );
-        """)
+            CREATE TABLE IF NOT EXISTS documentos_tareas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tarea_id TEXT NOT NULL,
+                nombre_archivo TEXT NOT NULL,
+                tipo_archivo TEXT NOT NULL,
+                tamano_bytes INTEGER,
+                texto_extraido TEXT NOT NULL,
+                resumen TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (tarea_id) REFERENCES solicitudes_tareas(id) ON DELETE CASCADE
+            );
+            """)
+        logger.info("Base de datos inicializada correctamente.")
+    except Exception as e:
+        logger.exception(f"Error inicializando base de datos: {e}")
 
 
 def generar_siguiente_id() -> str:
