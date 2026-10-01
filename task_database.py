@@ -152,17 +152,9 @@ def get_db_connection():
     if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
         try:
             import libsql
-            db_url = TURSO_DATABASE_URL.strip()
-            if db_url.lower().startswith('libsql://'):
-                db_url = 'libsql://' + db_url[9:]
-            
-            auth_token = TURSO_AUTH_TOKEN.strip()
-            if auth_token.startswith('EyJ'):
-                auth_token = 'eyJ' + auth_token[3:]
-
             raw_conn = libsql.connect(
-                database=db_url,
-                auth_token=auth_token
+                database=TURSO_DATABASE_URL,
+                auth_token=TURSO_AUTH_TOKEN
             )
             return LibSQLConnectionWrapper(raw_conn)
         except Exception as e:
