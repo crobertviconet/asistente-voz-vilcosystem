@@ -3,7 +3,7 @@
 =============================================================================
 VilcoSystem - Asistente Conversacional Decisional y Documental
 Líder Técnico: Cristian Villa
-Motor: Telegram Bot -> Gemini 3.8 Flash (Multimodal + Tools) -> gTTS
+Motor: Telegram Bot -> Gemini Multimodal (Fallback y Reintentos 503) -> gTTS
 Módulos: task_database (SQLite/Turso) + document_parser (Word/Excel/PDF/Scripts)
 =============================================================================
 """
@@ -11,11 +11,12 @@ Módulos: task_database (SQLite/Turso) + document_parser (Word/Excel/PDF/Scripts
 import os
 import sys
 import io
+import time
 import json
 import asyncio
 import logging
 import threading
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
@@ -92,7 +93,14 @@ except Exception as e:
     logger.exception(f"Error inicializando Google GenAI: {e}")
     sys.exit(1)
 
-MODEL_NAME = "gemini-3.8-flash"
+# Cascada de modelos compatibles para tolerar saturaciones de servidores (503) o 404
+CANDIDATE_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-3-flash"
+]
 
 SYSTEM_INSTRUCTION = (
     "Eres el Asistente Decisional y de Gestión Técnica de VilcoSystem, al servicio directo "
@@ -282,11 +290,47 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any]) -> Any:
 
 
 # =============================================================================
-# Inferencia con Gemini Multimodal y Bucle de Tools
+# Invocación con Reintentos y Cascada de Fallback (Tolerancia a 503 / 429)
 # =============================================================================
+def _generate_with_fallback(contents: List[Any], config: types.GenerateContentConfig) -> Tuple[Any, str]:
+    """
+    Invoca Gemini probando secuencialmente la lista de modelos compatibles.
+    Si un modelo responde 503 (servidor sobrecargado) o 429, reintenta y pasa al siguiente modelo alternativo.
+    """
+    last_error = None
+    for model_name in CANDIDATE_MODELS:
+        for attempt in range(2):
+            try:
+                logger.info(f"Llamando a Gemini con modelo '{model_name}' (intento {attempt + 1})...")
+                response = gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=config
+                )
+                if response:
+                    return response, model_name
+            except Exception as e:
+                err_str = str(e)
+                last_error = e
+                logger.warning(f"Excepción con modelo '{model_name}' (intento {attempt + 1}): {err_str[:120]}")
+
+                # Si el modelo no existe o está retirado, saltar inmediatamente al siguiente
+                if "404" in err_str or "NOT_FOUND" in err_str:
+                    break
+
+                # Si es sobrecarga temporal (503 UNAVAILABLE) o rate limit (429), esperar 1.2s antes de reintentar
+                if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
+                    time.sleep(1.2)
+                    continue
+
+    raise RuntimeError(
+        f"Todos los modelos de Gemini están experimentando alta demanda o fallaron temporalmente. "
+        f"Último error: {last_error}"
+    )
+
+
 def _run_gemini_turn(input_contents: List[Any]) -> str:
-    """Ejecuta una conversación con Gemini 3.8 Flash manejando bucles de Tool Calls."""
-    # Configuración del modelo con tools declaradas
+    """Ejecuta una conversación con Gemini manejando bucles de Tool Calls y tolerancia a fallos."""
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_INSTRUCTION,
         temperature=0.4,
@@ -295,13 +339,8 @@ def _run_gemini_turn(input_contents: List[Any]) -> str:
 
     current_contents = list(input_contents)
 
-    # Permitir hasta 4 vueltas de function calling si es necesario
     for turn in range(4):
-        response = gemini_client.models.generate_content(
-            model=MODEL_NAME,
-            contents=current_contents,
-            config=config
-        )
+        response, used_model = _generate_with_fallback(current_contents, config)
 
         function_calls = []
         if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
@@ -312,7 +351,6 @@ def _run_gemini_turn(input_contents: List[Any]) -> str:
         if not function_calls:
             return response.text or "Solicitud procesada correctamente."
 
-        # Procesar llamadas a herramientas
         current_contents.append(response.candidates[0].content)
         tool_response_parts = []
         for fc in function_calls:
@@ -381,10 +419,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         ]
         ai_response_text = await asyncio.to_thread(_run_gemini_turn, contents)
 
-        # Enviar texto
+        # Enviar respuesta de texto
         await message.reply_text(ai_response_text, reply_to_message_id=message.message_id)
 
-        # Enviar voz complementaria
+        # Enviar audio sintetizado
         try:
             await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
             voice_buf = await asyncio.to_thread(_synthesize_voice, ai_response_text)
@@ -399,7 +437,15 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.exception(f"Error procesando nota de voz: {e}")
-        await message.reply_text(f"⚠️ Error procesando nota de voz: {e}", reply_to_message_id=message.message_id)
+        err_str = str(e)
+        if "503" in err_str or "UNAVAILABLE" in err_str:
+            friendly_msg = "⚠️ Los servidores de Google Gemini están experimentando una saturación temporal de alta demanda (Error 503). Por favor reenvía tu audio en 10-15 segundos."
+        elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            friendly_msg = "⚠️ Se ha alcanzado el límite de cuota temporal de la API. Por favor espera unos momentos e intenta de nuevo."
+        else:
+            friendly_msg = f"⚠️ Ocurrió una incidencia al procesar tu solicitud:\n{err_str[:250]}"
+
+        await message.reply_text(friendly_msg, reply_to_message_id=message.message_id)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -408,6 +454,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not text:
         return
 
+    logger.info(f"Mensaje de texto recibido: '{text[:60]}...'")
     await message.reply_chat_action(action=constants.ChatAction.TYPING)
     try:
         contents = [text]
@@ -422,11 +469,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             logger.warning(f"Error generando audio: {e}")
     except Exception as e:
         logger.exception(f"Error en mensaje de texto: {e}")
-        await message.reply_text(f"⚠️ Error: {e}", reply_to_message_id=message.message_id)
+        err_str = str(e)
+        if "503" in err_str or "UNAVAILABLE" in err_str:
+            friendly_msg = "⚠️ Los servidores de Google Gemini están experimentando una saturación temporal de alta demanda (Error 503). Por favor reenvía tu mensaje en 10-15 segundos."
+        elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            friendly_msg = "⚠️ Límite de cuota temporal alcanzado en la API. Por favor espera unos momentos."
+        else:
+            friendly_msg = f"⚠️ Ocurrió una incidencia: {err_str[:250]}"
+
+        await message.reply_text(friendly_msg, reply_to_message_id=message.message_id)
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Maneja la recepción de archivos (Word, Excel, Scripts, PDFs) y los vincula a tareas."""
     message = update.effective_message
     doc = message.document
     if not doc:
@@ -440,15 +494,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await message.reply_chat_action(action=constants.ChatAction.TYPING)
 
     try:
-        # 1. Descargar archivo
         telegram_file = await context.bot.get_file(doc.file_id)
         file_bytes = bytes(await telegram_file.download_as_bytearray())
 
-        # 2. Extraer contenido textual mediante document_parser
         tipo_detectado, texto_extraido, resumen = document_parser.extract_content(file_bytes, filename)
         logger.info(f"Extracción completada: {tipo_detectado}, resumen: {resumen}")
 
-        # 3. Determinar a qué tarea asociarlo (por caption o última tarea activa)
         tarea_asociada = None
         if caption:
             tarea_asociada = task_database.buscar_tarea_por_termino(caption)
@@ -457,7 +508,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             tarea_asociada = task_database.obtener_ultima_tarea()
 
         if not tarea_asociada:
-            # Crear una tarea preliminar si no existiera ninguna
             tarea_asociada = task_database.crear_solicitud(
                 titulo=f"Revisión de documento: {filename}",
                 solicitante="Cristian Villa",
@@ -468,7 +518,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 criticidad="MODERADA"
             )
 
-        # 4. Guardar e indexar en base de datos
         doc_id = task_database.registrar_documento(
             tarea_id=tarea_asociada["id"],
             nombre_archivo=filename,
@@ -493,7 +542,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 def main() -> None:
-    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (Gemini 3.8 Flash)...")
+    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (Resiliente a 503)...")
     http_thread = threading.Thread(target=start_health_server, args=(PORT,), daemon=True)
     http_thread.start()
 
