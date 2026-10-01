@@ -4,6 +4,7 @@
 VilcoSystem - Asistente Conversacional de Voz Multimodal (Fase 1)
 Líder Técnico: Cristian Villa
 Arquitectura: Telegram Bot -> Gemini 2.5 Flash Multimodal (Audio directo) -> gTTS
+Soporte Render: Servidor HTTP integrado para Plan Free (Web Service)
 =============================================================================
 """
 
@@ -12,17 +13,20 @@ import sys
 import io
 import asyncio
 import logging
+import threading
 from typing import Optional
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
 # Cargar variables de entorno locales si existe un archivo .env
 load_dotenv()
 
-# Verificación defensiva de variables de entorno antes de importar librerías pesadas
+# Verificación de variables de entorno
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+PORT = int(os.getenv("PORT", "10000"))
 
-# Configuración de Logging Estructurado para Render / Cloud Logs
+# Configuración de Logging Estructurado
 logging.basicConfig(
     format="%(asctime)s - [%(levelname)s] - %(name)s - %(message)s",
     level=logging.INFO,
@@ -40,7 +44,41 @@ if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     logger.error("Por favor configure las variables de entorno requeridas en Render o en su archivo .env local.")
     sys.exit(1)
 
+
+# =============================================================================
+# Servidor HTTP para Render (Permite usar el Plan Free de Web Service)
+# =============================================================================
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Manejador HTTP simple para responder a los chequeos de Render."""
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write("VilcoSystem Voice Assistant Bot is running OK".encode("utf-8"))
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        # Silenciar logs excesivos de peticiones HTTP en consola
+        pass
+
+
+def start_health_server(port: int) -> None:
+    """Inicia el servidor HTTP en un hilo en segundo plano."""
+    try:
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        logger.info(f"Servidor HTTP de salud activo en el puerto {port} para Render.")
+        server.serve_forever()
+    except Exception as e:
+        logger.error(f"Error iniciando servidor HTTP en puerto {port}: {e}")
+
+
+# =============================================================================
 # Importaciones de Telegram y Google GenAI
+# =============================================================================
 from telegram import Update, constants
 from telegram.ext import (
     ApplicationBuilder,
@@ -102,8 +140,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def _generate_gemini_multimodal_audio(audio_data: bytes, mime_type: str = "audio/ogg") -> str:
     """
-    Ejecuta la llamada bloqueante a la API de Google GenAI enviando el binario directo del audio.
-    Se ejecuta en un hilo secundario mediante asyncio.to_thread para no bloquear el loop asíncrono.
+    Ejecuta la llamada a la API de Google GenAI enviando el binario directo del audio.
     """
     response = gemini_client.models.generate_content(
         model="gemini-2.5-flash",
@@ -139,7 +176,6 @@ def _synthesize_voice(text: str) -> io.BytesIO:
     Sintetiza texto a voz usando gTTS en un buffer de memoria BytesIO.
     Evita escrituras en disco efímero de Render.
     """
-    # Limpieza simple de markdown para que el TTS no lea asteriscos o almohadillas
     clean_text = text.replace("*", "").replace("#", "").replace("`", "").replace("_", "").strip()
     if not clean_text:
         clean_text = "He recibido tu mensaje correctamente."
@@ -164,29 +200,23 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = update.effective_user
     user_id = user.id if user else "desconocido"
 
-    # Determinar si es nota de voz o archivo de audio
     voice_obj = message.voice or message.audio
     if not voice_obj:
         return
 
     logger.info(f"Recibida nota de voz de {user_id} (Duración: {voice_obj.duration}s, Tamaño: {voice_obj.file_size} bytes)")
-
-    # Indicar al usuario que el bot está procesando y escuchando
     await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
 
     try:
-        # Descargar el archivo de Telegram a memoria
         telegram_file = await context.bot.get_file(voice_obj.file_id)
         audio_bytearray = await telegram_file.download_as_bytearray()
         audio_bytes = bytes(audio_bytearray)
         logger.info(f"Audio descargado exitosamente en memoria: {len(audio_bytes)} bytes.")
 
-        # Inferencia Multimodal en Gemini (ejecutado en subproceso para no congelar el loop)
         await message.reply_chat_action(action=constants.ChatAction.TYPING)
         ai_response_text = await asyncio.to_thread(_generate_gemini_multimodal_audio, audio_bytes, "audio/ogg")
         logger.info("Respuesta de Gemini 2.5 Flash generada satisfactoriamente.")
 
-        # Síntesis TTS asíncrona a buffer en memoria
         await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
         voice_buffer = await asyncio.to_thread(_synthesize_voice, ai_response_text)
         logger.info("Síntesis TTS (gTTS) completada.")
@@ -229,17 +259,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await message.reply_chat_action(action=constants.ChatAction.TYPING)
 
     try:
-        # Consulta de texto a Gemini 2.5 Flash
         ai_response_text = await asyncio.to_thread(_generate_gemini_text, user_text)
 
-        # Generar también el audio para mantener la experiencia de voz
         await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
         voice_buffer = await asyncio.to_thread(_synthesize_voice, ai_response_text)
 
-        # Enviar texto
         await message.reply_text(ai_response_text, reply_to_message_id=message.message_id)
 
-        # Enviar voz complementaria
         await message.reply_voice(
             voice=voice_buffer,
             caption="🎙️ *Audio respuesta*",
@@ -257,9 +283,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 def main() -> None:
-    """Punto de entrada principal para el servicio Worker."""
+    """Punto de entrada principal para el servicio."""
     logger.info("Iniciando Asistente Conversacional de Voz VilcoSystem (Fase 1)...")
     logger.info(f"Versión de Python: {sys.version.split()[0]}")
+
+    # Iniciar servidor HTTP en segundo plano para cumplir con el puerto de Render Free
+    http_thread = threading.Thread(target=start_health_server, args=(PORT,), daemon=True)
+    http_thread.start()
 
     # Construcción de la aplicación de Telegram
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()

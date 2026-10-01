@@ -1,5 +1,5 @@
 services:
-  - type: worker
+  - type: web
     name: vilcosystem-voice-assistant
     runtime: python
     region: oregon
@@ -13,3 +13,5 @@ services:
         sync: false
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: PORT
+        value: "10000"
