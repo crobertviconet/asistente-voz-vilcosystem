@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 =============================================================================
-VilcoSystem - Asistente Conversacional de Voz Multimodal (Fase 1 - Resiliente)
+VilcoSystem - Asistente Conversacional de Voz Multimodal (Fase 1 - Actualizado)
 Líder Técnico: Cristian Villa
-Arquitectura: Telegram Bot -> Gemini Multimodal (Fallback 2.5/2.0/1.5) -> gTTS
+Arquitectura: Telegram Bot -> Gemini 3.8 Flash (Multimodal nativo) -> gTTS
 =============================================================================
 """
 
@@ -13,7 +13,7 @@ import io
 import asyncio
 import logging
 import threading
-from typing import Optional
+from typing import Optional, List
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
@@ -96,16 +96,21 @@ SYSTEM_INSTRUCTION = (
     "Evita listas excesivamente largas, tablas o formatos complejos que dificulten la escucha en audio."
 )
 
-# Lista de modelos compatibles en orden de preferencia
-CANDIDATE_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+# Modelos recomendados oficialmente por la API de Google (gemini-3.8-flash sugerido en logs)
+CANDIDATE_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.0-flash",
+    "gemini-2.5-flash"
+]
 
 
 def _call_gemini_multimodal(audio_bytes: bytes) -> str:
-    """Invoca Gemini probando modelos compatibles si uno arroja 404 o no está disponible."""
+    """Invoca Gemini probando modelos compatibles recomendados por la API."""
     last_error = None
     for model_name in CANDIDATE_MODELS:
         try:
-            logger.info(f"Intentando procesar audio con modelo: '{model_name}'...")
+            logger.info(f"Procesando audio con modelo: '{model_name}'...")
             response = gemini_client.models.generate_content(
                 model=model_name,
                 contents=[
@@ -118,7 +123,7 @@ def _call_gemini_multimodal(audio_bytes: bytes) -> str:
                 )
             )
             if response and response.text:
-                logger.info(f"Éxito con modelo '{model_name}'.")
+                logger.info(f"Respuesta generada con éxito usando '{model_name}'.")
                 return response.text
         except Exception as e:
             logger.warning(f"Falla con modelo '{model_name}': {e}")
@@ -165,7 +170,7 @@ def _synthesize_voice(text: str) -> io.BytesIO:
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     welcome_text = (
         "👋 ¡Hola! Bienvenido al **Asistente de Voz de VilcoSystem**.\n\n"
-        "🎙️ Envíame una **nota de voz** o escribe un mensaje y te responderé de inmediato."
+        "🎙️ Envíame una **nota de voz** o escribe un mensaje y te responderé de inmediato con Gemini 3.8 Flash."
     )
     await update.message.reply_text(welcome_text, parse_mode=constants.ParseMode.MARKDOWN)
 
@@ -181,7 +186,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     logger.info(f"Procesando audio de usuario {user_id} (id={voice_obj.file_id})...")
     await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
 
-    # Paso 1: Descargar archivo de Telegram
+    # 1. Descargar audio de Telegram
     try:
         telegram_file = await context.bot.get_file(voice_obj.file_id)
         audio_bytearray = await telegram_file.download_as_bytearray()
@@ -189,45 +194,33 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.info(f"Audio descargado: {len(audio_bytes)} bytes.")
     except Exception as e:
         logger.exception(f"Error descargando audio de Telegram: {e}")
-        await message.reply_text(f"⚠️ Error al descargar el audio de Telegram: {e}", reply_to_message_id=message.message_id)
+        await message.reply_text(f"⚠️ Error descargando el audio: {e}", reply_to_message_id=message.message_id)
         return
 
-    # Paso 2: Inferencia en Gemini (multimodal)
+    # 2. Inferencia Multimodal en Gemini
     await message.reply_chat_action(action=constants.ChatAction.TYPING)
     try:
         ai_response_text = await asyncio.to_thread(_call_gemini_multimodal, audio_bytes)
         logger.info("Respuesta de Gemini obtenida con éxito.")
     except Exception as e:
         logger.exception(f"Error al invocar API de Gemini: {e}")
-        # Notificar causa específica del error para facilitar diagnóstico inmediato
-        err_msg = str(e)
-        if "403" in err_msg or "API_KEY_INVALID" in err_msg:
-            detalle = "Tu GEMINI_API_KEY no es válida o fue revocada. Revisa Google AI Studio."
-        elif "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
-            detalle = "Límite de cuota alcanzado en la API de Gemini. Espera unos minutos."
-        elif "404" in err_msg:
-            detalle = "Modelo no disponible en tu región o cuenta."
-        else:
-            detalle = f"Detalle técnico: {err_msg[:120]}"
-
         await message.reply_text(
-            f"⚠️ Error con el servicio de IA:\n{detalle}",
+            f"⚠️ Error en el servicio de IA:\n{e}",
             reply_to_message_id=message.message_id
         )
         return
 
-    # Paso 3: Enviar respuesta de texto PRIMERO (garantiza entrega de la respuesta)
+    # 3. Enviar respuesta de texto PRIMERO
     try:
         await message.reply_text(ai_response_text, reply_to_message_id=message.message_id)
     except Exception as e:
         logger.error(f"Error enviando mensaje de texto: {e}")
 
-    # Paso 4: Síntesis de voz (desacoplada para no invalidar el texto si gTTS falla)
+    # 4. Síntesis de voz (desacoplada)
     try:
         await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
         voice_buffer = await asyncio.to_thread(_synthesize_voice, ai_response_text)
         
-        # Enviar como nota de voz; si Telegram rechaza el formato, intentar como audio
         try:
             await message.reply_voice(
                 voice=voice_buffer,
@@ -263,7 +256,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 def main() -> None:
-    logger.info("Iniciando Asistente de Voz VilcoSystem (Versión Resiliente)...")
+    logger.info("Iniciando Asistente de Voz VilcoSystem con Gemini 3.8 Flash...")
     http_thread = threading.Thread(target=start_health_server, args=(PORT,), daemon=True)
     http_thread.start()
 
