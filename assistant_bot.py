@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
 =============================================================================
-VilcoSystem - Asistente Conversacional de Voz Multimodal (Fase 1)
+VilcoSystem - Asistente Conversacional de Voz Multimodal (Fase 1 - Resiliente)
 Líder Técnico: Cristian Villa
-Arquitectura: Telegram Bot -> Gemini 2.5 Flash Multimodal (Audio directo) -> gTTS
-Soporte Render: Servidor HTTP integrado para Plan Free (Web Service)
+Arquitectura: Telegram Bot -> Gemini Multimodal (Fallback 2.5/2.0/1.5) -> gTTS
 =============================================================================
 """
 
@@ -18,15 +17,13 @@ from typing import Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
-# Cargar variables de entorno locales si existe un archivo .env
+# Cargar variables de entorno
 load_dotenv()
 
-# Verificación de variables de entorno
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 
-# Configuración de Logging Estructurado
 logging.basicConfig(
     format="%(asctime)s - [%(levelname)s] - %(name)s - %(message)s",
     level=logging.INFO,
@@ -34,22 +31,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("VilcoVoiceAssistant")
 
-# Validación temprana de credenciales
 if not TELEGRAM_BOT_TOKEN:
-    logger.critical("VARIABLE CRÍTICA FALTANTE: 'TELEGRAM_BOT_TOKEN' no está configurada.")
+    logger.critical("VARIABLE CRÍTICA FALTANTE: 'TELEGRAM_BOT_TOKEN' no configurada.")
 if not GEMINI_API_KEY:
-    logger.critical("VARIABLE CRÍTICA FALTANTE: 'GEMINI_API_KEY' no está configurada.")
+    logger.critical("VARIABLE CRÍTICA FALTANTE: 'GEMINI_API_KEY' no configurada.")
 
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
-    logger.error("Por favor configure las variables de entorno requeridas en Render o en su archivo .env local.")
     sys.exit(1)
 
 
 # =============================================================================
-# Servidor HTTP para Render (Permite usar el Plan Free de Web Service)
+# Servidor HTTP para Render Free Plan
 # =============================================================================
 class HealthCheckHandler(BaseHTTPRequestHandler):
-    """Manejador HTTP simple para responder a los chequeos de Render."""
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -62,22 +56,20 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def log_message(self, format, *args):
-        # Silenciar logs excesivos de peticiones HTTP en consola
         pass
 
 
 def start_health_server(port: int) -> None:
-    """Inicia el servidor HTTP en un hilo en segundo plano."""
     try:
         server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        logger.info(f"Servidor HTTP de salud activo en el puerto {port} para Render.")
+        logger.info(f"Servidor HTTP de salud activo en puerto {port}.")
         server.serve_forever()
     except Exception as e:
         logger.error(f"Error iniciando servidor HTTP en puerto {port}: {e}")
 
 
 # =============================================================================
-# Importaciones de Telegram y Google GenAI
+# Telegram & Google GenAI
 # =============================================================================
 from telegram import Update, constants
 from telegram.ext import (
@@ -91,91 +83,73 @@ from google import genai
 from google.genai import types
 from gtts import gTTS
 
-# Inicialización del cliente nativo Google GenAI
 try:
     gemini_client = genai.Client(api_key=GEMINI_API_KEY)
     logger.info("Cliente de Google GenAI inicializado correctamente.")
 except Exception as e:
-    logger.exception(f"Error al inicializar el cliente de Google GenAI: {e}")
+    logger.exception(f"Error inicializando cliente de Google GenAI: {e}")
     sys.exit(1)
 
-# Instrucción de Sistema optimizada para respuestas de voz y ejecutivas
 SYSTEM_INSTRUCTION = (
-    "Eres el Asistente Virtual Inteligente de VilcoSystem, diseñado para interactuar "
-    "por voz y texto. Responde de forma clara, profesional, concisa y natural, "
-    "ideal para ser escuchada en una nota de voz. Evita listas excesivamente largas, "
-    "tablas complejas o caracteres markdown extraños que puedan sonar confusos al sintetizarse a audio. "
-    "Si el usuario te consulta sobre gestión de tareas, proyectos o información técnica, sé directo y estructurado."
+    "Eres el Asistente Virtual Inteligente de VilcoSystem. "
+    "Responde de forma clara, profesional, concisa y conversacional en español. "
+    "Evita listas excesivamente largas, tablas o formatos complejos que dificulten la escucha en audio."
 )
 
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manejador del comando /start y bienvenida al usuario."""
-    user = update.effective_user
-    nombre = user.first_name if user else "estimado usuario"
-    
-    welcome_text = (
-        f"👋 ¡Hola, {nombre}! Bienvenido al **Asistente de Voz de VilcoSystem**.\n\n"
-        "🎙️ **¿Cómo interactuar?**\n"
-        "• Envíame una **nota de voz** con cualquier consulta, tarea o requerimiento.\n"
-        "• También puedes escribirme mensajes de texto tradicionales.\n\n"
-        "⚡ *Tu audio es procesado directamente por la red neuronal nativa multimodal de Gemini 2.5 Flash, "
-        "sin conversiones intermedias con pérdidas de fidelidad.*"
-    )
-    await update.message.reply_text(welcome_text, parse_mode=constants.ParseMode.MARKDOWN)
-    logger.info(f"Comando /start ejecutado por el usuario {user.id} ({user.username or user.first_name})")
+# Lista de modelos compatibles en orden de preferencia
+CANDIDATE_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manejador del comando /help."""
-    help_text = (
-        "ℹ️ **Instrucciones de uso - Asistente VilcoSystem**\n\n"
-        "1. **Notas de Voz:** Presiona el botón del micrófono y habla naturalmente. "
-        "El asistente responderá con texto y una nota de voz sintetizada.\n"
-        "2. **Mensajes de Texto:** Envía preguntas o listas de tareas directamente.\n"
-        "3. **Soporte:** Arquitectura basada en Telegram Bot API + Gemini Multimodal."
-    )
-    await update.message.reply_text(help_text, parse_mode=constants.ParseMode.MARKDOWN)
+def _call_gemini_multimodal(audio_bytes: bytes) -> str:
+    """Invoca Gemini probando modelos compatibles si uno arroja 404 o no está disponible."""
+    last_error = None
+    for model_name in CANDIDATE_MODELS:
+        try:
+            logger.info(f"Intentando procesar audio con modelo: '{model_name}'...")
+            response = gemini_client.models.generate_content(
+                model=model_name,
+                contents=[
+                    types.Part.from_bytes(data=audio_bytes, mime_type="audio/ogg"),
+                    "Por favor, escucha atentamente este audio y responde a la consulta del usuario en español."
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0.7,
+                )
+            )
+            if response and response.text:
+                logger.info(f"Éxito con modelo '{model_name}'.")
+                return response.text
+        except Exception as e:
+            logger.warning(f"Falla con modelo '{model_name}': {e}")
+            last_error = e
+
+    raise RuntimeError(f"No se pudo procesar el audio con ningún modelo disponible. Último error: {last_error}")
 
 
-def _generate_gemini_multimodal_audio(audio_data: bytes, mime_type: str = "audio/ogg") -> str:
-    """
-    Ejecuta la llamada a la API de Google GenAI enviando el binario directo del audio.
-    """
-    response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[
-            types.Part.from_bytes(data=audio_data, mime_type=mime_type),
-            "Por favor, escucha este audio y responde a la consulta del usuario en español."
-        ],
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.7,
-        )
-    )
-    return response.text or "No se pudo interpretar el audio o la respuesta fue vacía."
+def _call_gemini_text(prompt: str) -> str:
+    """Invoca Gemini para texto con fallback entre modelos."""
+    last_error = None
+    for model_name in CANDIDATE_MODELS:
+        try:
+            response = gemini_client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0.7,
+                )
+            )
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            last_error = e
 
-
-def _generate_gemini_text(prompt: str) -> str:
-    """
-    Ejecuta la llamada a la API de Google GenAI para mensajes de texto.
-    """
-    response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.7,
-        )
-    )
-    return response.text or "Respuesta vacía recibida."
+    raise RuntimeError(f"Falla procesando texto. Último error: {last_error}")
 
 
 def _synthesize_voice(text: str) -> io.BytesIO:
-    """
-    Sintetiza texto a voz usando gTTS en un buffer de memoria BytesIO.
-    Evita escrituras en disco efímero de Render.
-    """
+    """Sintetiza texto a audio MP3 con gTTS."""
     clean_text = text.replace("*", "").replace("#", "").replace("`", "").replace("_", "").strip()
     if not clean_text:
         clean_text = "He recibido tu mensaje correctamente."
@@ -184,125 +158,121 @@ def _synthesize_voice(text: str) -> io.BytesIO:
     buffer = io.BytesIO()
     tts.write_to_fp(buffer)
     buffer.seek(0)
-    buffer.name = "response.ogg"
+    buffer.name = "response.mp3"
     return buffer
 
 
-async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Maneja notas de voz recibidas de Telegram:
-    1. Descarga el audio en memoria (.ogg / Opus).
-    2. Envía el binario directo a Gemini 2.5 Flash (Multimodal nativo).
-    3. Sintetiza la respuesta a voz con gTTS.
-    4. Devuelve respuesta dual (Texto + Nota de voz).
-    """
-    message = update.effective_message
-    user = update.effective_user
-    user_id = user.id if user else "desconocido"
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    welcome_text = (
+        "👋 ¡Hola! Bienvenido al **Asistente de Voz de VilcoSystem**.\n\n"
+        "🎙️ Envíame una **nota de voz** o escribe un mensaje y te responderé de inmediato."
+    )
+    await update.message.reply_text(welcome_text, parse_mode=constants.ParseMode.MARKDOWN)
 
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user_id = update.effective_user.id if update.effective_user else "unknown"
     voice_obj = message.voice or message.audio
+
     if not voice_obj:
         return
 
-    logger.info(f"Recibida nota de voz de {user_id} (Duración: {voice_obj.duration}s, Tamaño: {voice_obj.file_size} bytes)")
+    logger.info(f"Procesando audio de usuario {user_id} (id={voice_obj.file_id})...")
     await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
 
+    # Paso 1: Descargar archivo de Telegram
     try:
         telegram_file = await context.bot.get_file(voice_obj.file_id)
         audio_bytearray = await telegram_file.download_as_bytearray()
         audio_bytes = bytes(audio_bytearray)
-        logger.info(f"Audio descargado exitosamente en memoria: {len(audio_bytes)} bytes.")
+        logger.info(f"Audio descargado: {len(audio_bytes)} bytes.")
+    except Exception as e:
+        logger.exception(f"Error descargando audio de Telegram: {e}")
+        await message.reply_text(f"⚠️ Error al descargar el audio de Telegram: {e}", reply_to_message_id=message.message_id)
+        return
 
-        await message.reply_chat_action(action=constants.ChatAction.TYPING)
-        ai_response_text = await asyncio.to_thread(_generate_gemini_multimodal_audio, audio_bytes, "audio/ogg")
-        logger.info("Respuesta de Gemini 2.5 Flash generada satisfactoriamente.")
+    # Paso 2: Inferencia en Gemini (multimodal)
+    await message.reply_chat_action(action=constants.ChatAction.TYPING)
+    try:
+        ai_response_text = await asyncio.to_thread(_call_gemini_multimodal, audio_bytes)
+        logger.info("Respuesta de Gemini obtenida con éxito.")
+    except Exception as e:
+        logger.exception(f"Error al invocar API de Gemini: {e}")
+        # Notificar causa específica del error para facilitar diagnóstico inmediato
+        err_msg = str(e)
+        if "403" in err_msg or "API_KEY_INVALID" in err_msg:
+            detalle = "Tu GEMINI_API_KEY no es válida o fue revocada. Revisa Google AI Studio."
+        elif "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+            detalle = "Límite de cuota alcanzado en la API de Gemini. Espera unos minutos."
+        elif "404" in err_msg:
+            detalle = "Modelo no disponible en tu región o cuenta."
+        else:
+            detalle = f"Detalle técnico: {err_msg[:120]}"
 
+        await message.reply_text(
+            f"⚠️ Error con el servicio de IA:\n{detalle}",
+            reply_to_message_id=message.message_id
+        )
+        return
+
+    # Paso 3: Enviar respuesta de texto PRIMERO (garantiza entrega de la respuesta)
+    try:
+        await message.reply_text(ai_response_text, reply_to_message_id=message.message_id)
+    except Exception as e:
+        logger.error(f"Error enviando mensaje de texto: {e}")
+
+    # Paso 4: Síntesis de voz (desacoplada para no invalidar el texto si gTTS falla)
+    try:
         await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
         voice_buffer = await asyncio.to_thread(_synthesize_voice, ai_response_text)
-        logger.info("Síntesis TTS (gTTS) completada.")
-
-        # Enviar respuesta de texto
-        await message.reply_text(
-            ai_response_text,
-            reply_to_message_id=message.message_id
-        )
-
-        # Enviar respuesta de voz
-        await message.reply_voice(
-            voice=voice_buffer,
-            caption="🎙️ *Respuesta de voz (VilcoSystem)*",
-            parse_mode=constants.ParseMode.MARKDOWN,
-            reply_to_message_id=message.message_id
-        )
-        logger.info(f"Entrega dual (texto + voz) completada para usuario {user_id}.")
-
+        
+        # Enviar como nota de voz; si Telegram rechaza el formato, intentar como audio
+        try:
+            await message.reply_voice(
+                voice=voice_buffer,
+                caption="🎙️ *Respuesta de voz*",
+                parse_mode=constants.ParseMode.MARKDOWN,
+                reply_to_message_id=message.message_id
+            )
+        except Exception:
+            voice_buffer.seek(0)
+            await message.reply_audio(
+                audio=voice_buffer,
+                title="Respuesta de Voz VilcoSystem",
+                reply_to_message_id=message.message_id
+            )
+        logger.info("Audio respuesta enviado exitosamente.")
     except Exception as e:
-        logger.exception(f"Error procesando nota de voz de {user_id}: {e}")
-        await message.reply_text(
-            "⚠️ Ocurrió un error al procesar tu nota de voz con el servicio de IA. "
-            "Por favor intenta de nuevo en unos momentos.",
-            reply_to_message_id=message.message_id
-        )
+        logger.warning(f"No se pudo generar la nota de voz TTS, pero el texto fue entregado: {e}")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Maneja mensajes de texto tradicionales enviados por el usuario."""
     message = update.effective_message
-    user = update.effective_user
-    user_id = user.id if user else "desconocido"
     user_text = message.text
-
     if not user_text:
         return
 
-    logger.info(f"Recibido mensaje de texto de {user_id}: '{user_text[:40]}...'")
     await message.reply_chat_action(action=constants.ChatAction.TYPING)
-
     try:
-        ai_response_text = await asyncio.to_thread(_generate_gemini_text, user_text)
-
-        await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
-        voice_buffer = await asyncio.to_thread(_synthesize_voice, ai_response_text)
-
+        ai_response_text = await asyncio.to_thread(_call_gemini_text, user_text)
         await message.reply_text(ai_response_text, reply_to_message_id=message.message_id)
-
-        await message.reply_voice(
-            voice=voice_buffer,
-            caption="🎙️ *Audio respuesta*",
-            parse_mode=constants.ParseMode.MARKDOWN,
-            reply_to_message_id=message.message_id
-        )
-        logger.info(f"Respuesta dual a texto enviada a {user_id}.")
-
     except Exception as e:
-        logger.exception(f"Error procesando mensaje de texto de {user_id}: {e}")
-        await message.reply_text(
-            "⚠️ Lo siento, ocurrió un problema al procesar tu mensaje con Gemini. Por favor intenta nuevamente.",
-            reply_to_message_id=message.message_id
-        )
+        logger.exception(f"Error procesando texto: {e}")
+        await message.reply_text(f"⚠️ Error procesando mensaje: {e}", reply_to_message_id=message.message_id)
 
 
 def main() -> None:
-    """Punto de entrada principal para el servicio."""
-    logger.info("Iniciando Asistente Conversacional de Voz VilcoSystem (Fase 1)...")
-    logger.info(f"Versión de Python: {sys.version.split()[0]}")
-
-    # Iniciar servidor HTTP en segundo plano para cumplir con el puerto de Render Free
+    logger.info("Iniciando Asistente de Voz VilcoSystem (Versión Resiliente)...")
     http_thread = threading.Thread(target=start_health_server, args=(PORT,), daemon=True)
     http_thread.start()
 
-    # Construcción de la aplicación de Telegram
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Registro de manejadores de comandos
     app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("help", help_command))
-
-    # Registro de manejadores de mensajes
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    logger.info("Polling de Telegram iniciado. Escuchando eventos entrantes...")
+    logger.info("Polling iniciado...")
     app.run_polling(drop_pending_updates=True)
 
 
