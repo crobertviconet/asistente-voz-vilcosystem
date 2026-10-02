@@ -91,8 +91,30 @@ class VilcoPortalServerHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self._send_cors_headers()
             self.end_headers()
-            resp = json.dumps({"status": "ok", "app": "VilcoVoiceAssistant", "portal": "enabled"})
+            info_db = task_database.obtener_info_fuente_datos()
+            resp = json.dumps({
+                "status": "ok",
+                "app": "VilcoVoiceAssistant",
+                "portal": "enabled",
+                "database_engine": info_db.get("motor"),
+                "database_source": info_db.get("fuente"),
+                "database_tables": info_db.get("tablas")
+            })
             self.wfile.write(resp.encode("utf-8"))
+            return
+
+        elif path in ("/api/fuente", "/api/database"):
+            try:
+                info = task_database.obtener_info_fuente_datos()
+                payload = json.dumps({"status": "success", "fuente_datos": info}, default=str)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(payload.encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
             return
 
         # 2. API de Tareas

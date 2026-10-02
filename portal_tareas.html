@@ -1329,9 +1329,12 @@
 
         <!-- Estado Vacío -->
         <div class="empty-state" id="empty-state" style="display: none;">
-            <div class="empty-state-icon">📂</div>
-            <h3>No se encontraron tareas</h3>
-            <p>Intenta ajustar los filtros de búsqueda o registra un nuevo requerimiento.</p>
+            <div class="empty-state-icon">🎙️</div>
+            <h3>Base de Datos 'AsistenteTareas' en Turso</h3>
+            <p style="max-width: 620px; margin: 8px auto; line-height: 1.6; color: var(--text-muted);">
+                Aún no hay requerimientos registrados en la tabla <code>solicitudes_tareas</code>.<br>
+                Envía una nota de voz o mensaje al bot de Telegram del <strong>Asistente de Voz VilcoSystem</strong> para que la IA catalogue y registre automáticamente la solicitud en Turso, o haz clic en <strong>➕ Nueva Solicitud</strong> para registrarla manualmente desde este portal.
+            </p>
         </div>
 
     </div>
@@ -1561,215 +1564,55 @@
         let chartPriorityInstance = null;
 
         // Dataset de respaldo offline/demo
-        const FALLBACK_DATA = [
-            {
-                id: "REQ-001",
-                titulo: "Implementación de Ciclos de Lectura Independientes en ElectriApp (MEJ-16)",
-                solicitante: "Valerio",
-                cargo_solicitante: "SUBGERENTE",
-                area: "OPERACIONES",
-                descripcion: "Desvincular la apertura de rondas de lectura mensual respecto a la recepción de la factura oficial de Electrodunas, permitiendo a los lectores ingresar consumos desde el cierre de ciclo.",
-                prioridad: "ALTA",
-                criticidad: "ALTA",
-                justificacion_ia: "Evita cuellos de botella en la cobranza vecinal. Los lectores pueden registrar consumos a tiempo sin depender de la emisión de la empresa concesionaria.",
-                estado: "COMPLETADO",
-                porcentaje_avance: 100,
-                fecha_limite: "2026-09-25",
-                created_at: "2026-09-15 08:30:00",
-                completed_at: "2026-09-24 17:45:00",
-                total_documentos: 1,
-                total_bitacora: 3,
-                documentos: [
-                    { nombre_archivo: "acta_entrega_mej16.pdf", tipo_archivo: "PDF", tamano_bytes: 45210, resumen: "Acta de conformidad de pruebas de lectura independiente" }
-                ],
-                bitacora: [
-                    { created_at: "2026-09-16 10:15:00", comentario: "Diseño de la nueva estructura de períodos y estados de lectura sin dependencia de factura matriz.", porcentaje: 30, query_sql: "ALTER TABLE periodos_lectura ADD COLUMN factura_electrodunas_recibida INTEGER DEFAULT 0;" },
-                    { created_at: "2026-09-20 16:00:00", comentario: "Adaptación de vistas para lectores de campo y validación de rangos de consumo.", porcentaje: 70 },
-                    { created_at: "2026-09-24 17:45:00", comentario: "Despliegue a producción y pruebas de cierre de ciclo validadas exitosamente.", porcentaje: 100, doc_referencia: "acta_entrega_mej16.pdf" }
-                ]
-            },
-            {
-                id: "REQ-002",
-                titulo: "Cálculo y Automatización de Fechas Defensivas de Vencimiento (MEJ-15)",
-                solicitante: "Valerio",
-                cargo_solicitante: "SUBGERENTE",
-                area: "OPERACIONES",
-                descripcion: "Configurar el vencimiento de recibos familiares exactamente 5 días antes de la fecha límite de la factura matriz comunitaria de Electrodunas.",
-                prioridad: "ALTA",
-                criticidad: "CRITICA",
-                justificacion_ia: "Crítico para evitar cortes de suministro general por falta de liquidez colectiva en tesorería antes de la fecha de corte de Electrodunas.",
-                estado: "COMPLETADO",
-                porcentaje_avance: 100,
-                fecha_limite: "2026-09-28",
-                created_at: "2026-09-18 09:00:00",
-                completed_at: "2026-09-27 15:20:00",
-                total_documentos: 0,
-                total_bitacora: 2,
-                documentos: [],
-                bitacora: [
-                    { created_at: "2026-09-22 11:30:00", comentario: "Implementada función defensiva de cálculo de fecha de vencimiento (-5 días calendario de la matriz).", porcentaje: 60, query_sql: "UPDATE recibos_familia SET fecha_vencimiento = date(fecha_vencimiento_matriz, '-5 days');" },
-                    { created_at: "2026-09-27 15:20:00", comentario: "Regla validada en generación masiva de recibos y notificaciones WhatsApp a delegados de sector.", porcentaje: 100 }
-                ]
-            },
-            {
-                id: "REQ-003",
-                titulo: "Corrección de Imputación FIFO en Pagos sin Recibo Explícito (BUG-14)",
-                solicitante: "Ing. Carlos Mendoza",
-                cargo_solicitante: "JEFE_AREA",
-                area: "FACTURACION",
-                descripcion: "Garantizar que pagos parciales o pagos en ventanilla sin especificar ID de recibo amorticen obligatoriamente los recibos impagos más antiguos de la familia.",
-                prioridad: "URGENTE",
-                criticidad: "CRITICA",
-                justificacion_ia: "Evita que queden deudas antiguas devengando moras o intereses mientras recibos recientes aparecen pagados.",
-                estado: "COMPLETADO",
-                porcentaje_avance: 100,
-                fecha_limite: "2026-09-30",
-                created_at: "2026-09-26 14:10:00",
-                completed_at: "2026-09-30 18:00:00",
-                total_documentos: 0,
-                total_bitacora: 2,
-                documentos: [],
-                bitacora: [
-                    { created_at: "2026-09-28 12:00:00", comentario: "Detectada inconsistencia en amortización arbitraria; refactorizado algoritmo de imputación por fecha de emisión ascendente.", porcentaje: 50, query_sql: "SELECT id, saldo_pendiente FROM recibos WHERE familia_id = ? AND estado = 'PENDIENTE' ORDER BY fecha_emision ASC;" },
-                    { created_at: "2026-09-30 18:00:00", comentario: "Pruebas de conciliación bancaria y ventanilla aprobadas con 45 casos de prueba.", porcentaje: 100 }
-                ]
-            },
-            {
-                id: "REQ-004",
-                titulo: "Actualización Diaria Tasa TAMN SBS y Liquidación de Intereses (Octubre 2026)",
-                solicitante: "Valerio",
-                cargo_solicitante: "SUBGERENTE",
-                area: "FINANZAS",
-                descripcion: "Actualizar la tabla de tasas de interés moratorio activa de moneda nacional publicada por la SBS al inicio de Octubre 2026 y validar el recálculo diario.",
-                prioridad: "URGENTE",
-                criticidad: "CRITICA",
-                justificacion_ia: "Impacto directo en la liquidación financiera y cumplimiento con las normativas de Osinergmin y SBS para cobranza de recibos devengados.",
-                estado: "EN_PROCESO",
-                porcentaje_avance: 75,
-                fecha_limite: "2026-10-03",
-                created_at: "2026-10-01 07:45:00",
-                total_documentos: 0,
-                total_bitacora: 2,
-                documentos: [],
-                bitacora: [
-                    { created_at: "2026-10-01 16:38:00", comentario: "Extracción de tasas SBS al 01/10/2026 recibida y cotejada con correo formal a Electrodunas.", porcentaje: 50, query_sql: "INSERT INTO tasas_interes_sbs (fecha, tamn_anual, factor_diario) VALUES ('2026-10-01', 0.1425, 0.000366);" },
-                    { created_at: "2026-10-02 10:15:00", comentario: "Módulo de cálculo de intereses moratorios ejecutado en lote de prueba. En espera de visto bueno contable.", porcentaje: 75 }
-                ]
-            },
-            {
-                id: "REQ-005",
-                titulo: "Migración de Persistencia a Turso Cloud libSQL y Wrapper de Cursores",
-                solicitante: "Cristian Villa",
-                cargo_solicitante: "LIDER_TECNICO",
-                area: "TI",
-                descripcion: "Resolver la pérdida de datos por efimeridad de contenedores en Render conectando el Asistente a Turso libSQL con LibSQLConnectionWrapper y LibSQLRow.",
-                prioridad: "ALTA",
-                criticidad: "CRITICA",
-                justificacion_ia: "Vital para la persistencia del Asistente en la nube. Sin esto, cada reinicio de Render reinicia la base de datos a cero.",
-                estado: "EN_PROCESO",
-                porcentaje_avance: 85,
-                fecha_limite: "2026-10-04",
-                created_at: "2026-10-01 12:00:00",
-                total_documentos: 0,
-                total_bitacora: 3,
-                documentos: [],
-                bitacora: [
-                    { created_at: "2026-10-01 19:50:00", comentario: "Identificado error de tuplas crudas en driver libsql de Python; creadas clases envoltorias LibSQLRow y LibSQLCursorWrapper.", porcentaje: 40 },
-                    { created_at: "2026-10-02 06:10:00", comentario: "Verificada compatibilidad híbrida SQLite local y Turso Cloud con fallbacks automáticos.", porcentaje: 70 },
-                    { created_at: "2026-10-02 13:00:00", comentario: "Integrando servidor web para portal interactivo de control y health check en puerto Render.", porcentaje: 85 }
-                ]
-            },
-            {
-                id: "REQ-006",
-                titulo: "Auditoría de Balance Energético y Control de Pérdidas de Transformador",
-                solicitante: "Ing. Roberto Sánchez",
-                cargo_solicitante: "JEFE_AREA",
-                area: "OPERACIONES",
-                descripcion: "Comparar la energía activa total registrada en el medidor matriz vs la sumatoria de medidores secundarios de los 120 lotes del Sector A.",
-                prioridad: "MEDIA",
-                criticidad: "ALTA",
-                justificacion_ia: "Permite detectar conexiones clandestinas, fugas a tierra o medidores descalibrados antes del cierre de facturación.",
-                estado: "EN_PROCESO",
-                porcentaje_avance: 40,
-                fecha_limite: "2026-10-06",
-                created_at: "2026-10-01 15:20:00",
-                total_documentos: 0,
-                total_bitacora: 1,
-                documentos: [],
-                bitacora: [
-                    { created_at: "2026-10-02 11:00:00", comentario: "Consolidado preliminar de 98 de 120 lotes con 3.8% de delta estimado dentro del margen admisible.", porcentaje: 40, query_sql: "SELECT SUM(consumo_kwh) as consumo_total FROM lecturas_sector_a WHERE ciclo_id = '2026-09';" }
-                ]
-            },
-            {
-                id: "REQ-007",
-                titulo: "Validación Estricta de Sobrepagos y Bloqueo de Pagos Superfluos (BUG-17)",
-                solicitante: "Ing. Carlos Mendoza",
-                cargo_solicitante: "JEFE_AREA",
-                area: "FACTURACION",
-                descripcion: "Rechazar en backend con HTTP 400 cualquier intento de registrar un pago o voucher cuyo monto supere la deuda total de la familia.",
-                prioridad: "ALTA",
-                criticidad: "ALTA",
-                justificacion_ia: "Evita saldos a favor descontrolados en contabilidad y discrepancias con comprobantes fiscales.",
-                estado: "REVISION",
-                porcentaje_avance: 90,
-                fecha_limite: "2026-10-03",
-                created_at: "2026-09-29 11:00:00",
-                total_documentos: 0,
-                total_bitacora: 2,
-                documentos: [],
-                bitacora: [
-                    { created_at: "2026-09-30 16:30:00", comentario: "Desarrollada verificación previa de saldo insoluto antes de asentar transacción en ventanilla.", porcentaje: 60 },
-                    { created_at: "2026-10-02 09:40:00", comentario: "Subida a ambiente de pruebas; delegados verificando rechazo de pagos excedentes.", porcentaje: 90 }
-                ]
-            },
-            {
-                id: "REQ-008",
-                titulo: "Generador de Recibos Digitales en PDF con QR y Desglose de Pérdidas",
-                solicitante: "Lic. Patricia Quispe",
-                cargo_solicitante: "JEFE_AREA",
-                area: "GERENCIA",
-                descripcion: "Diseñar el formato oficial de recibo digital para descarga directa de las familias, con desglose de cargo fijo, alumbrado, pérdidas compartidas y QR de validación.",
-                prioridad: "BAJA",
-                criticidad: "MODERADA",
-                justificacion_ia: "Mejora la transparencia frente a las familias asociadas y agiliza la auditoría comunitaria.",
-                estado: "PENDIENTE",
-                porcentaje_avance: 15,
-                fecha_limite: "2026-10-10",
-                created_at: "2026-10-02 08:30:00",
-                total_documentos: 0,
-                total_bitacora: 1,
-                documentos: [],
-                bitacora: [
-                    { created_at: "2026-10-02 11:30:00", comentario: "Revisión de requerimientos visuales y logotipo corporativo VilcoSystem.", porcentaje: 15 }
-                ]
-            }
-        ];
+        let dbSourceInfo = { motor: "Consultando...", fuente: "" };
 
-        // Carga Inicial de Datos
+        // Carga Dinámica Directa desde la Base de Datos Real en Turso
         async function loadDashboardData() {
+            // 1. Consultar estado y motor de la base de datos (Turso vs SQLite)
+            try {
+                const fuenteRes = await fetch('/api/fuente');
+                if (fuenteRes.ok) {
+                    const fData = await fuenteRes.json();
+                    if (fData && fData.fuente_datos) {
+                        dbSourceInfo = fData.fuente_datos;
+                        const statusBadge = document.getElementById('status-label');
+                        if (dbSourceInfo.modo_produccion) {
+                            statusBadge.innerText = '🟢 Conectado a Turso Cloud (' + (dbSourceInfo.tablas ? dbSourceInfo.tablas.length : 4) + ' tablas)';
+                            statusBadge.title = 'Persistencia activa en base de datos remota Turso Cloud libSQL';
+                        } else {
+                            statusBadge.innerText = '🟡 SQLite Local (Desarrollo)';
+                            statusBadge.title = 'Persistencia en archivo SQLite local';
+                        }
+                    }
+                }
+            } catch (err) {
+                console.log('No se pudo consultar /api/fuente:', err);
+            }
+
+            // 2. Consultar las tareas reales desde las tablas de la base de datos
             try {
                 const res = await fetch('/api/tareas');
                 if (res.ok) {
                     const data = await res.json();
-                    if (data && data.tareas && data.tareas.length > 0) {
-                        allTasks = data.tareas;
-                        document.getElementById('status-label').innerText = 'En Línea • Servidor Activo';
+                    if (data && data.status === 'success') {
+                        allTasks = data.tareas || [];
                     } else {
-                        allTasks = FALLBACK_DATA;
+                        allTasks = [];
                     }
                 } else {
-                    allTasks = FALLBACK_DATA;
+                    console.error('Error HTTP al consultar /api/tareas:', res.status);
+                    allTasks = [];
                 }
             } catch (err) {
-                console.log('Modo independiente / API no disponible. Utilizando datos precargados:', err);
-                allTasks = FALLBACK_DATA;
-                document.getElementById('status-label').innerText = 'Modo Local / Standalone';
+                console.error('Error de red al consultar API de tareas:', err);
+                allTasks = [];
+                const statusBadge = document.getElementById('status-label');
+                statusBadge.innerText = '🔴 Error de conexión con API / Base de datos';
             }
 
             calculateMetricsAndRender();
         }
 
-        // Cálculo de Métricas y Renderizado de Componentes
         function calculateMetricsAndRender() {
             const total = allTasks.length;
             const completadas = allTasks.filter(t => t.estado === 'COMPLETADO');

@@ -664,152 +664,21 @@ def obtener_metricas_dashboard() -> Dict[str, Any]:
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
 
+def obtener_info_fuente_datos() -> Dict[str, Any]:
+    """Retorna información técnica sobre la base de datos activa (Turso Cloud vs SQLite local)."""
+    usa_turso = bool(TURSO_DATABASE_URL and TURSO_AUTH_TOKEN)
+    return {
+        "motor": "Turso Cloud (libSQL)" if usa_turso else "SQLite Local (Desarrollo)",
+        "fuente": "Base de datos remota 'AsistenteTareas' en Turso" if usa_turso else "Archivo local SQLite",
+        "url_o_archivo": TURSO_DATABASE_URL if usa_turso else DB_FILE,
+        "tablas": [
+            "solicitudes_tareas",
+            "bitacora_avance",
+            "documentos_tareas",
+            "directorio_personal"
+        ],
+        "modo_produccion": usa_turso
+    }
 
-def seed_demo_data() -> None:
-    """Pre-carga datos iniciales realistas de VilcoSystem si la base de datos está vacía."""
-    try:
-        with get_db_connection() as conn:
-            check = conn.execute("SELECT COUNT(*) as c FROM solicitudes_tareas;").fetchone()
-            if check and check["c"] > 0:
-                return
-
-        logger.info("Base de datos sin registros. Inicializando datos modelo de VilcoSystem...")
-        # 1. Directorio
-        personal = [
-            ("Valerio", "Subgerente de Operaciones", 2, "OPERACIONES", "valerio@vilcosystem.com"),
-            ("Ing. Carlos Mendoza", "Jefe de Facturación y Medición", 3, "FACTURACION", "carlos.mendoza@vilcosystem.com"),
-            ("Cristian Villa", "Líder Técnico & Arquitectura", 1, "TI", "cristian.villa@vilcosystem.com"),
-            ("Lic. Patricia Quispe", "Jefa de Finanzas y Administración", 3, "FINANZAS", "patricia.quispe@vilcosystem.com"),
-            ("Ing. Roberto Sánchez", "Jefe de Redes y Distribución", 3, "OPERACIONES", "roberto.sanchez@vilcosystem.com"),
-            ("Dr. Fernando Salazar", "Gerente General", 1, "GERENCIA", "fernando.salazar@vilcosystem.com")
-        ]
-        for p in personal:
-            guardar_personal(p[0], p[1], p[2], p[3], p[4])
-
-        # 2. Solicitudes y Bitácoras
-        # REQ-001
-        t1 = crear_solicitud(
-            titulo="Implementación de Ciclos de Lectura Independientes en ElectriApp (MEJ-16)",
-            solicitante="Valerio",
-            cargo_solicitante="SUBGERENTE",
-            area="OPERACIONES",
-            descripcion="Desvincular la apertura de rondas de lectura mensual respecto a la recepción de la factura oficial de Electrodunas, permitiendo a los lectores ingresar consumos desde el cierre de ciclo.",
-            prioridad="ALTA",
-            criticidad="ALTA",
-            justificacion_ia="Evita cuellos de botella en la cobranza vecinal. Los lectores pueden registrar consumos a tiempo sin depender de la emisión de la empresa concesionaria.",
-            fecha_limite="2026-09-25"
-        )
-        actualizar_avance(t1["id"], "Diseño de la nueva estructura de períodos y estados de lectura sin dependencia de factura matriz.", "EN_PROCESO", 30, "ALTER TABLE periodos_lectura ADD COLUMN factura_electrodunas_recibida INTEGER DEFAULT 0;")
-        actualizar_avance(t1["id"], "Adaptación de vistas para lectores de campo y validación de rangos de consumo.", "EN_PROCESO", 70)
-        actualizar_avance(t1["id"], "Despliegue a producción y pruebas de cierre de ciclo validadas exitosamente.", "COMPLETADO", 100, doc_referencia="acta_entrega_mej16.pdf")
-
-        # REQ-002
-        t2 = crear_solicitud(
-            titulo="Cálculo y Automatización de Fechas Defensivas de Vencimiento (MEJ-15)",
-            solicitante="Valerio",
-            cargo_solicitante="SUBGERENTE",
-            area="OPERACIONES",
-            descripcion="Configurar el vencimiento de recibos familiares exactamente 5 días antes de la fecha límite de la factura matriz comunitaria de Electrodunas.",
-            prioridad="ALTA",
-            criticidad="CRITICA",
-            justificacion_ia="Crítico para evitar cortes de suministro general por falta de liquidez colectiva en tesorería antes de la fecha de corte de Electrodunas.",
-            fecha_limite="2026-09-28"
-        )
-        actualizar_avance(t2["id"], "Implementada función defensiva de cálculo de fecha de vencimiento (-5 días calendario de la matriz).", "EN_PROCESO", 60, "UPDATE recibos_familia SET fecha_vencimiento = date(fecha_vencimiento_matriz, '-5 days');")
-        actualizar_avance(t2["id"], "Regla validada en generación masiva de recibos y notificaciones WhatsApp a delegados de sector.", "COMPLETADO", 100)
-
-        # REQ-003
-        t3 = crear_solicitud(
-            titulo="Corrección de Imputación FIFO en Pagos sin Recibo Explícito (BUG-14)",
-            solicitante="Ing. Carlos Mendoza",
-            cargo_solicitante="JEFE_AREA",
-            area="FACTURACION",
-            descripcion="Garantizar que pagos parciales o pagos en ventanilla sin especificar ID de recibo amorticen obligatoriamente los recibos impagos más antiguos de la familia.",
-            prioridad="URGENTE",
-            criticidad="CRITICA",
-            justificacion_ia="Evita que queden deudas antiguas devengando moras o intereses mientras recibos recientes aparecen pagados.",
-            fecha_limite="2026-09-30"
-        )
-        actualizar_avance(t3["id"], "Detectada inconsistencia en amortización arbitraria; refactorizado algoritmo de imputación por fecha de emisión ascendente.", "EN_PROCESO", 50, "SELECT id, saldo_pendiente FROM recibos WHERE familia_id = ? AND estado = 'PENDIENTE' ORDER BY fecha_emision ASC;")
-        actualizar_avance(t3["id"], "Pruebas de conciliación bancaria y ventanilla aprobadas con 45 casos de prueba.", "COMPLETADO", 100)
-
-        # REQ-004
-        t4 = crear_solicitud(
-            titulo="Actualización Diaria Tasa TAMN SBS y Liquidación de Intereses (Octubre 2026)",
-            solicitante="Valerio",
-            cargo_solicitante="SUBGERENTE",
-            area="FINANZAS",
-            descripcion="Actualizar la tabla de tasas de interés moratorio activa de moneda nacional publicada por la SBS al inicio de Octubre 2026 y validar el recálculo diario.",
-            prioridad="URGENTE",
-            criticidad="CRITICA",
-            justificacion_ia="Impacto directo en la liquidación financiera y cumplimiento con las normativas de Osinergmin y SBS para cobranza de recibos devengados.",
-            fecha_limite="2026-10-03"
-        )
-        actualizar_avance(t4["id"], "Extracción de tasas SBS al 01/10/2026 recibida y cotejada con correo formal a Electrodunas.", "EN_PROCESO", 50, "INSERT INTO tasas_interes_sbs (fecha, tamn_anual, factor_diario) VALUES ('2026-10-01', 0.1425, 0.000366);")
-        actualizar_avance(t4["id"], "Módulo de cálculo de intereses moratorios ejecutado en lote de prueba. En espera de visto bueno contable.", "EN_PROCESO", 75)
-
-        # REQ-005
-        t5 = crear_solicitud(
-            titulo="Migración de Persistencia a Turso Cloud libSQL y Wrapper de Cursores",
-            solicitante="Cristian Villa",
-            cargo_solicitante="LIDER_TECNICO",
-            area="TI",
-            descripcion="Resolver la pérdida de datos por efimeridad de contenedores en Render conectando el Asistente a Turso libSQL con LibSQLConnectionWrapper y LibSQLRow.",
-            prioridad="ALTA",
-            criticidad="CRITICA",
-            justificacion_ia="Vital para la persistencia del Asistente en la nube. Sin esto, cada reinicio de Render reinicia la base de datos a cero.",
-            fecha_limite="2026-10-04"
-        )
-        actualizar_avance(t5["id"], "Identificado error de tuplas crudas en driver libsql de Python; creadas clases envoltorias LibSQLRow y LibSQLCursorWrapper.", "EN_PROCESO", 40)
-        actualizar_avance(t5["id"], "Verificada compatibilidad híbrida SQLite local y Turso Cloud con fallbacks automáticos.", "EN_PROCESO", 70)
-        actualizar_avance(t5["id"], "Integrando servidor web para portal interactivo de control y health check en puerto Render.", "EN_PROCESO", 85)
-
-        # REQ-006
-        t6 = crear_solicitud(
-            titulo="Auditoría de Balance Energético y Control de Pérdidas de Transformador",
-            solicitante="Ing. Roberto Sánchez",
-            cargo_solicitante="JEFE_AREA",
-            area="OPERACIONES",
-            descripcion="Comparar la energía activa total registrada en el medidor matriz vs la sumatoria de medidores secundarios de los 120 lotes del Sector A.",
-            prioridad="MEDIA",
-            criticidad="ALTA",
-            justificacion_ia="Permite detectar conexiones clandestinas, fugas a tierra o medidores descalibrados antes del cierre de facturación.",
-            fecha_limite="2026-10-06"
-        )
-        actualizar_avance(t6["id"], "Consolidado preliminar de 98 de 120 lotes con 3.8% de delta estimado dentro del margen admisible.", "EN_PROCESO", 40, "SELECT SUM(consumo_kwh) as consumo_total FROM lecturas_sector_a WHERE ciclo_id = '2026-09';")
-
-        # REQ-007
-        t7 = crear_solicitud(
-            titulo="Validación Estricta de Sobrepagos y Bloqueo de Pagos Superfluos (BUG-17)",
-            solicitante="Ing. Carlos Mendoza",
-            cargo_solicitante="JEFE_AREA",
-            area="FACTURACION",
-            descripcion="Rechazar en backend con HTTP 400 cualquier intento de registrar un pago o voucher cuyo monto supere la deuda total de la familia.",
-            prioridad="ALTA",
-            criticidad="ALTA",
-            justificacion_ia="Evita saldos a favor descontrolados en contabilidad y discrepancias con comprobantes fiscales.",
-            fecha_limite="2026-10-03"
-        )
-        actualizar_avance(t7["id"], "Desarrollada verificación previa de saldo insoluto antes de asentar transacción en ventanilla.", "EN_PROCESO", 60)
-        actualizar_avance(t7["id"], "Subida a ambiente de pruebas; delegados verificando rechazo de pagos excedentes.", "REVISION", 90)
-
-        # REQ-008
-        t8 = crear_solicitud(
-            titulo="Generador de Recibos Digitales en PDF con QR y Desglose de Pérdidas",
-            solicitante="Lic. Patricia Quispe",
-            cargo_solicitante="JEFE_AREA",
-            area="GERENCIA",
-            descripcion="Diseñar el formato oficial de recibo digital para descarga directa de las familias, con desglose de cargo fijo, alumbrado, pérdidas compartidas y QR de validación.",
-            prioridad="BAJA",
-            criticidad="MODERADA",
-            justificacion_ia="Mejora la transparencia frente a las familias asociadas y agiliza la auditoría comunitaria.",
-            fecha_limite="2026-10-10"
-        )
-        actualizar_avance(t8["id"], "Revisión de requerimientos visuales y logotipo corporativo VilcoSystem.", "PENDIENTE", 15)
-
-        logger.info("Datos modelo de VilcoSystem cargados exitosamente.")
-    except Exception as e:
-        logger.warning(f"Error cargando seed_demo_data: {e}")
 
 init_db()
-seed_demo_data()
