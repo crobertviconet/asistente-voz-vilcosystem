@@ -333,6 +333,8 @@ def get_gemini_client(api_key: Optional[str] = None):
     
     # 1. Priorizar clave pasada explícitamente en la petición
     key = api_key
+    if key:
+        key = key.strip().strip("'").strip('"')
     
     # 2. Si no, buscar en variables de entorno con múltiples alias y limpieza de comillas
     if not key:
@@ -342,18 +344,21 @@ def get_gemini_client(api_key: Optional[str] = None):
                 key = val.strip().strip("'").strip('"')
                 break
 
-    if key:
+    if not key:
+        # Intento de instanciar cliente por defecto si el entorno ya tiene credenciales de Google
         try:
-            # Recrear cliente si no existe o si la clave cambió
-            gemini_client = genai.Client(api_key=key)
-            # Guardar en entorno para sincronizar otros módulos
-            os.environ["GEMINI_API_KEY"] = key
+            gemini_client = genai.Client()
             return gemini_client
-        except Exception as e:
-            logger.error(f"Error inicializando Google GenAI con API Key: {e}")
+        except Exception:
             return None
-            
-    return gemini_client
+
+    try:
+        gemini_client = genai.Client(api_key=key)
+        os.environ["GEMINI_API_KEY"] = key
+        return gemini_client
+    except Exception as e:
+        logger.error(f"Error inicializando Google GenAI con API Key: {e}")
+        return None
 
 
 # =============================================================================

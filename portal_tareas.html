@@ -1784,23 +1784,28 @@
             const msg = document.getElementById('conn-status-msg');
             msg.style.display = 'block';
             msg.style.color = '#f59e0b';
-            msg.innerText = 'Probando conexión...';
+            msg.innerText = 'Probando conexión y guardando credenciales...';
 
             localStorage.setItem('vilco_conn_mode', activeConnMode);
+
+            // Guardar clave de Gemini siempre (compartida para todos los modos)
+            const gKey = document.getElementById('cfg-gemini-key').value.trim();
+            if (gKey) {
+                localStorage.setItem('vilco_gemini_key', gKey);
+            } else {
+                localStorage.removeItem('vilco_gemini_key');
+            }
 
             if (activeConnMode === 'render') {
                 const bUrl = document.getElementById('cfg-backend-url').value.trim().replace(/\/+$/, '');
                 localStorage.setItem('vilco_backend_url', bUrl);
-                const gKey = document.getElementById('cfg-gemini-key').value.trim();
-                if (gKey) localStorage.setItem('vilco_gemini_key', gKey);
-                else localStorage.removeItem('vilco_gemini_key');
                 try {
                     const testUrl = (bUrl || '') + '/api/tareas';
                     const res = await fetch(testUrl);
                     if (!res.ok) throw new Error('HTTP ' + res.status);
                     const d = await res.json();
                     msg.style.color = '#10b981';
-                    msg.innerText = '✅ Conexión exitosa. ' + (d.tareas ? d.tareas.length : 0) + ' tareas encontradas.';
+                    msg.innerText = '✅ Conexión exitosa al Servidor. ' + (d.tareas ? d.tareas.length : 0) + ' tareas encontradas.';
                     setTimeout(() => {
                         closeConnectionModal();
                         loadDashboardData();
@@ -2619,6 +2624,40 @@
         let speechRecognition = null;
         let currentTranscript = "";
         let selectedAudioMimeType = "audio/webm";
+        let lastRecordedAudioBlob = null;
+        let lastRecordedMime = "audio/webm";
+        let lastRecordedTranscript = "";
+
+        function saveInlineGeminiKeyAndRetry() {
+            const input = document.getElementById('inline-gemini-key-input');
+            const key = input ? input.value.trim() : '';
+            if (!key) {
+                alert('Por favor ingresa tu Gemini API Key antes de reintentar.');
+                return;
+            }
+
+            localStorage.setItem('vilco_gemini_key', key);
+            const cfgInput = document.getElementById('cfg-gemini-key');
+            if (cfgInput) cfgInput.value = key;
+
+            const box = document.getElementById('inline-gemini-key-box');
+            if (box) box.style.display = 'none';
+
+            document.getElementById('voice-status-title').innerText = '🧠 Reintentando con tu clave Gemini...';
+            document.getElementById('voice-status-subtitle').innerText = 'Catalogando y actualizando Turso Cloud...';
+            const micBtn = document.getElementById('voice-mic-btn');
+            if (micBtn) micBtn.innerText = '⏳';
+
+            if (lastRecordedAudioBlob) {
+                sendAudioToGemini(lastRecordedAudioBlob, lastRecordedMime, lastRecordedTranscript);
+            } else if (lastRecordedTranscript) {
+                document.getElementById('voice-text-fallback').value = lastRecordedTranscript;
+                sendVoiceTextFallback();
+            } else {
+                resetVoiceModalForNew();
+            }
+        }
+
 
         function openVoiceModal() {
             openModal('modal-voice');
@@ -2848,6 +2887,9 @@
                 
                 setTimeout(() => {
                     const audioBlob = new Blob(audioChunks, { type: selectedAudioMimeType });
+                    lastRecordedAudioBlob = audioBlob;
+                    lastRecordedMime = selectedAudioMimeType;
+                    lastRecordedTranscript = currentTranscript;
                     sendAudioToGemini(audioBlob, selectedAudioMimeType, currentTranscript);
                 }, 350);
             }
@@ -2904,10 +2946,17 @@
                         console.error('Error enviando audio a /api/voz:', err);
                         document.getElementById('voice-status-title').innerText = '❌ Error al procesar audio';
                         let errMsg = err.message || '';
-                        if (errMsg.includes('GEMINI_API_KEY')) {
-                            document.getElementById('voice-status-subtitle').innerHTML = errMsg + '<br><button class="btn btn-primary" style="margin-top:8px;font-size:12px;padding:4px 12px;" onclick="closeVoiceModal(); openConnectionModal();">🔑 Configurar Gemini API Key</button>';
-                        } else {
-                            document.getElementById('voice-status-subtitle').innerText = errMsg;
+                        document.getElementById('voice-status-subtitle').innerText = errMsg;
+                        if (errMsg.includes('GEMINI_API_KEY') || errMsg.includes('clave')) {
+                            const inlineBox = document.getElementById('inline-gemini-key-box');
+                            if (inlineBox) {
+                                inlineBox.style.display = 'block';
+                                const keyInp = document.getElementById('inline-gemini-key-input');
+                                if (keyInp) {
+                                    keyInp.value = localStorage.getItem('vilco_gemini_key') || '';
+                                    keyInp.focus();
+                                }
+                            }
                         }
                         const micBtn = document.getElementById('voice-mic-btn');
                         if (micBtn) micBtn.innerText = '⚠️';
@@ -3029,15 +3078,20 @@
                     </button>
                 </div>
 
+                <!-- Clave Gemini Compartida para ambos modos (Render y Turso Directo) -->
+                <div class="form-group" style="margin-bottom: 20px; padding: 14px; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 10px;">
+                    <label class="form-label" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>🔑 Clave de API de Gemini (GEMINI_API_KEY):</span>
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" style="font-size: 11px; color: #818cf8; text-decoration: underline;">Obtener clave en Google AI Studio</a>
+                    </label>
+                    <input type="password" id="cfg-gemini-key" class="form-control" placeholder="AIzaSy... (Tu clave de Google AI Studio)" />
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                        Necesaria para procesar tu voz con IA y catalogar o actualizar tareas. Funciona tanto con Servidor Render como con Turso Directo.
+                    </div>
+                </div>
+
                 <!-- Panel 1: Render / Local -->
                 <div id="conn-panel-render">
-                    <div class="form-group" style="margin-bottom: 16px;">
-                        <label class="form-label">Clave de API de Gemini (GEMINI_API_KEY):</label>
-                        <input type="password" id="cfg-gemini-key" class="form-control" placeholder="AIzaSy... (Opcional si ya está configurada en Render)" />
-                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-                            Permite al Asistente de Voz procesar audios y catalogar solicitudes con IA si Render aún no tiene la variable definida.
-                        </div>
-                    </div>
                     <div class="form-group">
                         <label class="form-label">URL del Backend (Render o Local):</label>
                         <input type="text" id="cfg-backend-url" class="form-control" placeholder="https://tu-servicio.onrender.com o http://localhost:10000" />
@@ -3137,6 +3191,22 @@
                         <button class="btn btn-outline" id="voice-btn-cancel" style="display: none;" onclick="cancelVoiceRecording()">
                             ❌ Cancelar
                         </button>
+                    </div>
+
+                    <!-- Mini Panel para ingresar Gemini API Key directamente sin salir del dictado -->
+                    <div id="inline-gemini-key-box" style="display: none; background: rgba(30, 41, 59, 0.95); border: 1px solid #6366f1; border-radius: 12px; padding: 16px; margin: 15px auto 0 auto; max-width: 520px; text-align: left;">
+                        <div style="font-weight: 700; color: #a5b4fc; font-size: 13px; margin-bottom: 4px;">
+                            🔑 Configura tu Gemini API Key para procesar:
+                        </div>
+                        <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;">
+                            Ingresa tu clave de Google AI Studio para que Gemini pueda catalogar tu audio y actualizar las tablas en Turso Cloud:
+                        </p>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="password" id="inline-gemini-key-input" class="form-control" placeholder="AIzaSy... (Pega tu clave aquí)" style="flex: 1; font-size: 13px;" />
+                            <button class="btn btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="saveInlineGeminiKeyAndRetry()">
+                                💾 Guardar y Reintentar
+                            </button>
+                        </div>
                     </div>
                 </div>
 
