@@ -8,6 +8,8 @@ Arquitectura: LibSQLConnectionWrapper + LibSQLRow para compatibilidad total
 """
 
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import sqlite3
 import datetime
 import logging
@@ -23,10 +25,21 @@ TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 # =============================================================================
 # Wrapper de Compatibilidad LibSQLRow para Turso
 # =============================================================================
+FALLBACK_COLS_SOLICITUDES = [
+    "id", "titulo", "solicitante", "cargo_solicitante", "area", "descripcion",
+    "prioridad", "criticidad", "justificacion_ia", "estado", "porcentaje_avance",
+    "fecha_limite", "created_at", "completed_at", "orden_jerarquia"
+]
+
 class LibSQLRow(dict):
     """Fila compatible con acceso por nombre de columna, índice numérico y dict(row)."""
     def __init__(self, cursor_description, row_values):
-        col_names = [col[0] for col in cursor_description] if cursor_description else []
+        col_names = []
+        if cursor_description:
+            col_names = [col[0] if isinstance(col, (tuple, list)) else str(col) for col in cursor_description]
+        if not col_names and len(row_values) >= len(FALLBACK_COLS_SOLICITUDES):
+            col_names = FALLBACK_COLS_SOLICITUDES[:len(row_values)]
+        
         self._values = tuple(row_values)
         super().__init__(zip(col_names, row_values))
 
@@ -41,8 +54,11 @@ class LibSQLCursorWrapper:
     def __init__(self, cursor):
         self._cursor = cursor
 
-    def execute(self, sql, params=()):
-        self._cursor.execute(sql, params)
+    def execute(self, sql, params=None):
+        if params is not None and len(params) > 0:
+            self._cursor.execute(sql, params)
+        else:
+            self._cursor.execute(sql)
         return self
 
     def executemany(self, sql, seq_of_params):
@@ -600,19 +616,48 @@ def obtener_todas_las_tareas() -> List[Dict[str, Any]]:
         resultado = []
         for r in rows:
             t = dict(r)
-            b_rows = conn.execute(
-                "SELECT * FROM bitacora_avance WHERE tarea_id = ? ORDER BY id ASC;",
-                (t["id"],)
-            ).fetchall()
-            t["bitacora"] = [dict(b) for b in b_rows]
-            d_rows = conn.execute(
-                "SELECT id, nombre_archivo, tipo_archivo, tamano_bytes, resumen, created_at FROM documentos_tareas WHERE tarea_id = ? ORDER BY id ASC;",
-                (t["id"],)
-            ).fetchall()
-            t["documentos"] = [dict(d) for d in d_rows]
+            tarea_id = t.get("id")
+            if not tarea_id:
+                if hasattr(r, "_values") and len(r._values) > 0:
+                    tarea_id = str(r._values[0])
+                    t["id"] = tarea_id
+                else:
+                    continue
+
+            # Valores por defecto para evitar nulos
+            t.setdefault("titulo", "Sin título")
+            t.setdefault("solicitante", "No especificado")
+            t.setdefault("cargo_solicitante", "OPERATIVO")
+            t.setdefault("area", "OPERACIONES")
+            t.setdefault("prioridad", "MEDIA")
+            t.setdefault("criticidad", "MODERADA")
+            t.setdefault("estado", "PENDIENTE")
+            t.setdefault("porcentaje_avance", 0)
+
+            # Subconsulta bitácora defensiva
+            try:
+                b_rows = conn.execute(
+                    "SELECT * FROM bitacora_avance WHERE tarea_id = ? ORDER BY id ASC;",
+                    (tarea_id,)
+                ).fetchall()
+                t["bitacora"] = [dict(b) for b in b_rows]
+            except Exception as eb:
+                t["bitacora"] = []
+
+            # Subconsulta documentos defensiva
+            try:
+                d_rows = conn.execute(
+                    "SELECT id, nombre_archivo, tipo_archivo, tamano_bytes, resumen, created_at FROM documentos_tareas WHERE tarea_id = ? ORDER BY id ASC;",
+                    (tarea_id,)
+                ).fetchall()
+                t["documentos"] = [dict(d) for d in d_rows]
+            except Exception as ed:
+                t["documentos"] = []
+
             t["total_bitacora"] = len(t["bitacora"])
             t["total_documentos"] = len(t["documentos"])
             resultado.append(t)
+            
         return resultado
 
 

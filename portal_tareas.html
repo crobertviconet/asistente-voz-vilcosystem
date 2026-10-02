@@ -1104,10 +1104,13 @@
                 </div>
             </div>
             <div class="header-actions">
-                <div class="system-status">
-                    <span class="status-dot"></span>
-                    <span id="status-label">En Línea • Turso / Render</span>
+                <div class="system-status" onclick="openConnectionModal()" style="cursor: pointer;" title="Clic para configurar origen de datos">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-label">Conectando...</span>
                 </div>
+                <button class="btn btn-outline" onclick="openConnectionModal()" title="Configurar conexión con Render o Turso">
+                    🔌 Conexión
+                </button>
                 <button class="btn btn-outline" onclick="exportToCSV()" title="Exportar reporte en CSV">
                     📥 Exportar CSV
                 </button>
@@ -1123,6 +1126,19 @@
             </div>
         </div>
     </header>
+    <!-- Banner informativo si no hay conexión configurada -->
+    <div id="connection-banner" style="display: none; background: rgba(59, 130, 246, 0.12); border-bottom: 1px solid rgba(59, 130, 246, 0.25); padding: 10px 24px; font-size: 13px; color: #93c5fd;">
+        <div style="max-width: 1440px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span>ℹ️</span>
+                <span id="banner-text"><strong>Modo Local:</strong> Si abres este archivo localmente o tu servicio de Render está en otra URL, indica la URL del servidor o tus credenciales de Turso.</span>
+            </div>
+            <button class="btn btn-primary" style="padding: 4px 14px; font-size: 12px; height: 32px;" onclick="openConnectionModal()">
+                🔌 Configurar Origen de Datos
+            </button>
+        </div>
+    </div>
+
 
     <div class="main-wrapper">
 
@@ -1565,49 +1581,246 @@
 
         // Dataset de respaldo offline/demo
         let dbSourceInfo = { motor: "Consultando...", fuente: "" };
+        let activeConnMode = localStorage.getItem('vilco_conn_mode') || 'render';
 
-        // Carga Dinámica Directa desde la Base de Datos Real en Turso
-        async function loadDashboardData() {
-            // 1. Consultar estado y motor de la base de datos (Turso vs SQLite)
-            try {
-                const fuenteRes = await fetch('/api/fuente');
-                if (fuenteRes.ok) {
-                    const fData = await fuenteRes.json();
-                    if (fData && fData.fuente_datos) {
-                        dbSourceInfo = fData.fuente_datos;
-                        const statusBadge = document.getElementById('status-label');
-                        if (dbSourceInfo.modo_produccion) {
-                            statusBadge.innerText = '🟢 Conectado a Turso Cloud (' + (dbSourceInfo.tablas ? dbSourceInfo.tablas.length : 4) + ' tablas)';
-                            statusBadge.title = 'Persistencia activa en base de datos remota Turso Cloud libSQL';
-                        } else {
-                            statusBadge.innerText = '🟡 SQLite Local (Desarrollo)';
-                            statusBadge.title = 'Persistencia en archivo SQLite local';
-                        }
-                    }
+        function openConnectionModal() {
+            document.getElementById('modal-connection').classList.add('active');
+            document.getElementById('cfg-backend-url').value = localStorage.getItem('vilco_backend_url') || '';
+            document.getElementById('cfg-turso-url').value = localStorage.getItem('turso_db_url') || 'libsql://asistentetareas-crobertviconet.turso.io';
+            document.getElementById('cfg-turso-token').value = localStorage.getItem('turso_auth_token') || '';
+            switchConnectionTab(activeConnMode);
+        }
+
+        function closeConnectionModal() {
+            document.getElementById('modal-connection').classList.remove('active');
+        }
+
+        function switchConnectionTab(mode) {
+            activeConnMode = mode;
+            const btnR = document.getElementById('tab-btn-render');
+            const btnT = document.getElementById('tab-btn-turso');
+            const pR = document.getElementById('conn-panel-render');
+            const pT = document.getElementById('conn-panel-turso');
+            if (mode === 'render') {
+                btnR.className = 'btn btn-primary';
+                btnT.className = 'btn btn-outline';
+                pR.style.display = 'block';
+                pT.style.display = 'none';
+            } else {
+                btnR.className = 'btn btn-outline';
+                btnT.className = 'btn btn-primary';
+                pR.style.display = 'none';
+                pT.style.display = 'block';
+            }
+        }
+
+        function resetConnectionConfig() {
+            localStorage.removeItem('vilco_backend_url');
+            localStorage.removeItem('turso_db_url');
+            localStorage.removeItem('turso_auth_token');
+            localStorage.removeItem('vilco_conn_mode');
+            document.getElementById('cfg-backend-url').value = '';
+            document.getElementById('cfg-turso-url').value = 'libsql://asistentetareas-crobertviconet.turso.io';
+            document.getElementById('cfg-turso-token').value = '';
+            const msg = document.getElementById('conn-status-msg');
+            msg.style.display = 'block';
+            msg.style.color = '#38bdf8';
+            msg.innerText = 'Configuración restablecida. Se usará la ruta relativa por defecto.';
+        }
+
+        async function saveAndTestConnection() {
+            const msg = document.getElementById('conn-status-msg');
+            msg.style.display = 'block';
+            msg.style.color = '#f59e0b';
+            msg.innerText = 'Probando conexión...';
+
+            localStorage.setItem('vilco_conn_mode', activeConnMode);
+
+            if (activeConnMode === 'render') {
+                const bUrl = document.getElementById('cfg-backend-url').value.trim().replace(/\/+$/, '');
+                localStorage.setItem('vilco_backend_url', bUrl);
+                try {
+                    const testUrl = (bUrl || '') + '/api/tareas';
+                    const res = await fetch(testUrl);
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const d = await res.json();
+                    msg.style.color = '#10b981';
+                    msg.innerText = '✅ Conexión exitosa. ' + (d.tareas ? d.tareas.length : 0) + ' tareas encontradas.';
+                    setTimeout(() => {
+                        closeConnectionModal();
+                        loadDashboardData();
+                    }, 800);
+                } catch (e) {
+                    msg.style.color = '#ef4444';
+                    msg.innerText = '❌ Error al conectar con ' + (bUrl || 'origen actual') + ': ' + e.message;
                 }
-            } catch (err) {
-                console.log('No se pudo consultar /api/fuente:', err);
+            } else {
+                const tUrl = document.getElementById('cfg-turso-url').value.trim();
+                const tToken = document.getElementById('cfg-turso-token').value.trim();
+                localStorage.setItem('turso_db_url', tUrl);
+                localStorage.setItem('turso_auth_token', tToken);
+                try {
+                    const tareas = await fetchDirectFromTurso(tUrl, tToken);
+                    msg.style.color = '#10b981';
+                    msg.innerText = '✅ Conexión directa a Turso Cloud exitosa. ' + tareas.length + ' tareas encontradas.';
+                    setTimeout(() => {
+                        closeConnectionModal();
+                        loadDashboardData();
+                    }, 800);
+                } catch (e) {
+                    msg.style.color = '#ef4444';
+                    msg.innerText = '❌ Error al conectar con Turso Cloud: ' + e.message;
+                }
+            }
+        }
+
+        async function fetchDirectFromTurso(tursoUrl, tursoToken) {
+            let cleanUrl = tursoUrl.trim().replace(/^libsql:\/\//i, 'https://');
+            if (!cleanUrl.startsWith('http')) cleanUrl = 'https://' + cleanUrl;
+            cleanUrl = cleanUrl.replace(/\/+$/, '') + '/v2/pipeline';
+
+            const body = {
+                requests: [
+                    { type: "execute", stmt: { sql: "SELECT * FROM solicitudes_tareas ORDER BY created_at DESC;" } },
+                    { type: "execute", stmt: { sql: "SELECT * FROM bitacora_avance ORDER BY id ASC;" } },
+                    { type: "execute", stmt: { sql: "SELECT id, tarea_id, nombre_archivo, tipo_archivo, tamano_bytes, resumen, created_at FROM documentos_tareas ORDER BY id ASC;" } }
+                ]
+            };
+
+            const res = await fetch(cleanUrl, {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + tursoToken.trim(),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!res.ok) {
+                const errTxt = await res.text();
+                throw new Error("HTTP " + res.status + ": " + errTxt);
             }
 
-            // 2. Consultar las tareas reales desde las tablas de la base de datos
+            const data = await res.json();
+            const tasksRes = data.results[0].response.result;
+            const bitacoraRes = data.results[1].response.result;
+            const docsRes = data.results[2].response.result;
+
+            const colNames = tasksRes.cols.map(c => c.name);
+            const tareas = tasksRes.rows.map(row => {
+                let obj = {};
+                colNames.forEach((col, idx) => {
+                    obj[col] = (row[idx] && row[idx].value !== undefined) ? row[idx].value : null;
+                });
+                return obj;
+            });
+
+            const bitacoraCols = bitacoraRes.cols.map(c => c.name);
+            const bitacoras = bitacoraRes.rows.map(row => {
+                let obj = {};
+                bitacoraCols.forEach((col, idx) => {
+                    obj[col] = (row[idx] && row[idx].value !== undefined) ? row[idx].value : null;
+                });
+                return obj;
+            });
+
+            const docCols = docsRes.cols.map(c => c.name);
+            const docs = docsRes.rows.map(row => {
+                let obj = {};
+                docCols.forEach((col, idx) => {
+                    obj[col] = (row[idx] && row[idx].value !== undefined) ? row[idx].value : null;
+                });
+                return obj;
+            });
+
+            tareas.forEach(t => {
+                t.bitacora = bitacoras.filter(b => b.tarea_id === t.id);
+                t.documentos = docs.filter(d => d.tarea_id === t.id);
+                t.total_bitacora = t.bitacora.length;
+                t.total_documentos = t.documentos.length;
+            });
+
+            return tareas;
+        }
+
+        // Carga Dinámica desde la Base de Datos Real en Turso
+        async function loadDashboardData() {
+            const statusLabel = document.getElementById('status-label');
+            const statusDot = document.getElementById('status-dot');
+            const banner = document.getElementById('connection-banner');
+
+            const isFileProtocol = window.location.protocol === 'file:';
+            let customBackendUrl = localStorage.getItem('vilco_backend_url') || '';
+            let connMode = localStorage.getItem('vilco_conn_mode') || 'render';
+            let tursoUrl = localStorage.getItem('turso_db_url');
+            let tursoToken = localStorage.getItem('turso_auth_token');
+
+            // 1. Si está configurado modo Turso Directo
+            if (connMode === 'turso' && tursoUrl && tursoToken) {
+                try {
+                    statusLabel.innerText = 'Consultando Turso Cloud...';
+                    const tareas = await fetchDirectFromTurso(tursoUrl, tursoToken);
+                    allTasks = tareas || [];
+                    statusLabel.innerText = '🟢 Turso Cloud Directo (' + allTasks.length + ' tareas)';
+                    if (banner) banner.style.display = 'none';
+                    calculateMetricsAndRender();
+                    return;
+                } catch (e) {
+                    console.error('Error en conexión directa a Turso:', e);
+                    statusLabel.innerText = '🔴 Error en Turso Directo';
+                    if (banner) {
+                        banner.style.display = 'block';
+                        document.getElementById('banner-text').innerText = 'Error al consultar Turso Cloud directamente: ' + e.message;
+                    }
+                }
+            }
+
+            // 2. Modo Backend (Render o Local)
+            let apiUrl = customBackendUrl;
+            if (!apiUrl && isFileProtocol) {
+                if (banner) banner.style.display = 'block';
+                statusLabel.innerText = '🟡 Modo Local (Sin servidor vinculado)';
+                allTasks = [];
+                calculateMetricsAndRender();
+                return;
+            }
+
             try {
-                const res = await fetch('/api/tareas');
+                // Consultar información del motor
+                try {
+                    const fRes = await fetch((apiUrl || '') + '/api/fuente');
+                    if (fRes.ok) {
+                        const fData = await fRes.json();
+                        if (fData && fData.fuente_datos) dbSourceInfo = fData.fuente_datos;
+                    }
+                } catch (ef) {}
+
+                // Consultar tareas
+                const res = await fetch((apiUrl || '') + '/api/tareas');
                 if (res.ok) {
                     const data = await res.json();
                     if (data && data.status === 'success') {
                         allTasks = data.tareas || [];
+                        if (banner) banner.style.display = 'none';
+                        if (dbSourceInfo.modo_produccion) {
+                            statusLabel.innerText = '🟢 Conectado a Turso Cloud (' + allTasks.length + ' tareas)';
+                        } else {
+                            statusLabel.innerText = '🟢 Conectado al Servidor (' + allTasks.length + ' tareas)';
+                        }
                     } else {
                         allTasks = [];
+                        statusLabel.innerText = '⚠️ Respuesta inesperada de la API';
                     }
                 } else {
-                    console.error('Error HTTP al consultar /api/tareas:', res.status);
                     allTasks = [];
+                    statusLabel.innerText = '🔴 Error HTTP ' + res.status + ' al consultar API';
+                    if (banner) banner.style.display = 'block';
                 }
             } catch (err) {
                 console.error('Error de red al consultar API de tareas:', err);
                 allTasks = [];
-                const statusBadge = document.getElementById('status-label');
-                statusBadge.innerText = '🔴 Error de conexión con API / Base de datos';
+                statusLabel.innerText = '🔴 Desconectado del Servidor API';
+                if (banner) banner.style.display = 'block';
             }
 
             calculateMetricsAndRender();
@@ -2239,5 +2452,67 @@
             loadDashboardData();
         });
     </script>
+
+    <!-- Modal de Conexión de Datos (Render / Local / Turso Directo) -->
+    <div class="modal-backdrop" id="modal-connection">
+        <div class="modal" style="max-width: 600px;">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <span>🔌 Configurar Origen de Datos del Portal</span>
+                </div>
+                <button class="btn-close" onclick="closeConnectionModal()">×</button>
+            </div>
+            <div class="modal-body" style="padding: 24px;">
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+                    Elige cómo deseas conectar este portal a tus datos registrados por el bot de voz de Telegram:
+                </p>
+
+                <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+                    <button id="tab-btn-render" class="btn btn-primary" style="padding: 6px 14px; font-size: 13px;" onclick="switchConnectionTab('render')">
+                        🌐 Servidor Render / Local
+                    </button>
+                    <button id="tab-btn-turso" class="btn btn-outline" style="padding: 6px 14px; font-size: 13px;" onclick="switchConnectionTab('turso')">
+                        ⚡ Turso Cloud Directo
+                    </button>
+                </div>
+
+                <!-- Panel 1: Render / Local -->
+                <div id="conn-panel-render">
+                    <div class="form-group">
+                        <label class="form-label">URL del Backend (Render o Local):</label>
+                        <input type="text" id="cfg-backend-url" class="form-control" placeholder="https://tu-servicio.onrender.com o http://localhost:10000" />
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+                            Si el portal está alojado en el mismo Render, puedes dejarlo vacío (usará la ruta relativa <code>/api/tareas</code>).
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel 2: Turso Directo -->
+                <div id="conn-panel-turso" style="display: none;">
+                    <div class="form-group">
+                        <label class="form-label">URL de Base de Datos Turso:</label>
+                        <input type="text" id="cfg-turso-url" class="form-control" placeholder="libsql://asistentetareas-crobertviconet.turso.io" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Token de Autenticación de Turso (Auth Token):</label>
+                        <textarea id="cfg-turso-token" class="form-control" rows="3" placeholder="eyJhbGciOiJFZERTQ... (Token de turso.tech)"></textarea>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+                        Permite consultar directamente las tablas <code>solicitudes_tareas</code> y <code>bitacora_avance</code> en Turso Cloud desde el navegador sin intermediarios.
+                    </div>
+                </div>
+
+                <div id="conn-status-msg" style="margin-top: 15px; font-size: 13px; font-weight: 500; display: none;"></div>
+            </div>
+            <div class="modal-footer" style="padding: 16px 24px; display: flex; justify-content: space-between;">
+                <button class="btn btn-outline" onclick="resetConnectionConfig()">Restablecer</button>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-outline" onclick="closeConnectionModal()">Cancelar</button>
+                    <button class="btn btn-primary" onclick="saveAndTestConnection()">💾 Guardar y Conectar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

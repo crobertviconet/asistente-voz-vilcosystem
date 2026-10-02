@@ -67,7 +67,7 @@ class VilcoPortalServerHandler(BaseHTTPRequestHandler):
 
         # 1. Rutas de salud y raíz
         if path in ("/", "/index.html"):
-            portal_path = os.path.join(os.path.dirname(__file__), "portal_tareas.html")
+            portal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portal_tareas.html")
             if os.path.exists(portal_path):
                 with open(portal_path, "rb") as f:
                     content = f.read()
