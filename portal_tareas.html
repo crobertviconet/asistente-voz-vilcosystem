@@ -5,316 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VilcoSystem | Portal de Operaciones y Control de Tareas</title>
     <!-- Chart.js para visualización de indicadores -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js">
-        // =====================================================================
-        // MÓDULO DE VOZ Y ASISTENTE MULTIMODAL EN EL PORTAL
-        // =====================================================================
-        let mediaRecorder = null;
-        let audioChunks = [];
-        let isRecording = false;
-        let recordStartTime = 0;
-        let recordTimerInterval = null;
-        let speechRecognition = null;
-        let currentTranscript = "";
-
-        function openVoiceModal() {
-            document.getElementById('modal-voice').classList.add('active');
-            resetVoiceModalForNew();
-        }
-
-        function closeVoiceModal() {
-            if (isRecording) {
-                cancelVoiceRecording();
-            }
-            document.getElementById('modal-voice').classList.remove('active');
-            const audioElem = document.getElementById('voice-audio-element');
-            if (audioElem) {
-                audioElem.pause();
-                audioElem.src = '';
-            }
-        }
-
-        function resetVoiceModalForNew() {
-            isRecording = false;
-            audioChunks = [];
-            currentTranscript = "";
-            clearInterval(recordTimerInterval);
-
-            const micBtn = document.getElementById('voice-mic-btn');
-            const wave = document.getElementById('voice-sound-wave');
-            micBtn.className = 'mic-button';
-            micBtn.innerText = '🎙️';
-            wave.className = 'sound-wave';
-
-            document.getElementById('voice-status-title').innerText = 'Presiona el micrófono para comenzar';
-            document.getElementById('voice-status-subtitle').innerText = 'Tiempo máximo por nota: 60 segundos';
-            document.getElementById('voice-timer').innerText = '00:00';
-            document.getElementById('voice-timer').style.color = '#38bdf8';
-            document.getElementById('voice-live-text').innerText = '"Presiona el micrófono y di, por ejemplo: 'Registra un pedido urgente de Operaciones solicitado por Valerio: generar base de clientes...'"';
-            document.getElementById('voice-live-text').style.color = '#e2e8f0';
-
-            document.getElementById('voice-btn-stop').style.display = 'none';
-            document.getElementById('voice-btn-cancel').style.display = 'none';
-            document.getElementById('voice-btn-new').style.display = 'none';
-            document.getElementById('voice-response-box').style.display = 'none';
-            document.getElementById('voice-audio-player-container').style.display = 'none';
-        }
-
-        async function toggleVoiceRecording() {
-            if (!isRecording) {
-                startVoiceRecording();
-            } else {
-                stopVoiceRecording(true);
-            }
-        }
-
-        async function startVoiceRecording() {
-            try {
-                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    alert('Tu navegador no soporta captura de micrófono. Por favor usa Google Chrome, Microsoft Edge o Firefox.');
-                    return;
-                }
-
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                audioChunks = [];
-
-                let options = {};
-                if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-                    options = { mimeType: 'audio/webm;codecs=opus' };
-                } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-                    options = { mimeType: 'audio/webm' };
-                } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
-                    options = { mimeType: 'audio/ogg;codecs=opus' };
-                } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-                    options = { mimeType: 'audio/mp4' };
-                }
-
-                mediaRecorder = new MediaRecorder(stream, options);
-                mediaRecorder.ondataavailable = (e) => {
-                    if (e.data && e.data.size > 0) {
-                        audioChunks.push(e.data);
-                    }
-                };
-
-                mediaRecorder.onstop = () => {
-                    stream.getTracks().forEach(track => track.stop());
-                };
-
-                mediaRecorder.start(250);
-                isRecording = true;
-                recordStartTime = Date.now();
-
-                // Interfaz en modo grabación
-                const micBtn = document.getElementById('voice-mic-btn');
-                const wave = document.getElementById('voice-sound-wave');
-                micBtn.className = 'mic-button recording';
-                micBtn.innerText = '🔴';
-                wave.className = 'sound-wave recording';
-
-                document.getElementById('voice-status-title').innerText = 'Escuchando tu voz... Di tu pedido';
-                document.getElementById('voice-status-subtitle').innerText = 'Habla con claridad. Presiona Detener al finalizar.';
-                document.getElementById('voice-btn-stop').style.display = 'inline-block';
-                document.getElementById('voice-btn-cancel').style.display = 'inline-block';
-
-                // Temporizador
-                recordTimerInterval = setInterval(() => {
-                    const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
-                    const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
-                    const secs = String(elapsed % 60).padStart(2, '0');
-                    document.getElementById('voice-timer').innerText = `${mins}:${secs}`;
-
-                    if (elapsed >= 60) {
-                        stopVoiceRecording(true);
-                    }
-                }, 500);
-
-                // Inicializar reconocimiento de voz en vivo si está disponible en Chrome
-                initSpeechRecognitionPreview();
-
-            } catch (err) {
-                console.error('Error accediendo al micrófono:', err);
-                alert('No se pudo acceder al micrófono: ' + err.message + '. Asegúrate de otorgar permisos al navegador.');
-            }
-        }
-
-        function initSpeechRecognitionPreview() {
-            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (SpeechRec) {
-                try {
-                    speechRecognition = new SpeechRec();
-                    speechRecognition.lang = 'es-PE';
-                    speechRecognition.continuous = true;
-                    speechRecognition.interimResults = true;
-
-                    speechRecognition.onresult = (event) => {
-                        let interim = '';
-                        for (let i = event.resultIndex; i < event.results.length; ++i) {
-                            if (event.results[i].isFinal) {
-                                currentTranscript += event.results[i][0].transcript + ' ';
-                            } else {
-                                interim += event.results[i][0].transcript;
-                            }
-                        }
-                        const fullText = (currentTranscript + ' ' + interim).trim();
-                        if (fullText) {
-                            document.getElementById('voice-live-text').innerText = `"${fullText}"`;
-                            document.getElementById('voice-live-text').style.color = '#38bdf8';
-                        }
-                    };
-
-                    speechRecognition.onerror = (e) => {
-                        console.log('SpeechRecognition notice:', e.error);
-                    };
-
-                    speechRecognition.start();
-                } catch (e) {
-                    console.log('Speech recognition not available:', e);
-                }
-            }
-        }
-
-        function stopVoiceRecording(processWithAI = true) {
-            if (!isRecording) return;
-            isRecording = false;
-            clearInterval(recordTimerInterval);
-
-            if (speechRecognition) {
-                try { speechRecognition.stop(); } catch (e) {}
-            }
-
-            const micBtn = document.getElementById('voice-mic-btn');
-            const wave = document.getElementById('voice-sound-wave');
-            micBtn.className = 'mic-button';
-            micBtn.innerText = '⏳';
-            wave.className = 'sound-wave';
-
-            document.getElementById('voice-btn-stop').style.display = 'none';
-            document.getElementById('voice-btn-cancel').style.display = 'none';
-
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-            }
-
-            if (processWithAI) {
-                document.getElementById('voice-status-title').innerText = '🧠 Gemini procesando tu voz...';
-                document.getElementById('voice-status-subtitle').innerText = 'Catalogando requerimiento y actualizando Turso Cloud...';
-                
-                // Esperar a que el blob esté consolidado
-                setTimeout(() => {
-                    const mime = (mediaRecorder && mediaRecorder.mimeType) ? mediaRecorder.mimeType : 'audio/webm';
-                    const audioBlob = new Blob(audioChunks, { type: mime });
-                    sendAudioToGemini(audioBlob, mime, currentTranscript);
-                }, 300);
-            }
-        }
-
-        function cancelVoiceRecording() {
-            stopVoiceRecording(false);
-            resetVoiceModalForNew();
-        }
-
-        async function sendAudioToGemini(audioBlob, mimeType, transcriptText) {
-            try {
-                // Convertir Blob a Base64
-                const reader = new FileReader();
-                reader.readAsDataURL(audioBlob);
-                reader.onloadend = async () => {
-                    const base64Data = reader.result.split(',')[1];
-                    const customBackend = localStorage.getItem('vilco_backend_url') || '';
-                    const endpoint = (customBackend ? customBackend : '') + '/api/voz';
-
-                    try {
-                        const res = await fetch(endpoint, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                audio_base64: base64Data,
-                                mime_type: mimeType,
-                                texto: transcriptText || ''
-                            })
-                        });
-
-                        if (!res.ok) {
-                            const errData = await res.json().catch(() => ({}));
-                            throw new Error(errData.error || errData.message || ('HTTP ' + res.status));
-                        }
-
-                        const data = await res.json();
-                        handleVoiceSuccessResponse(data);
-                    } catch (err) {
-                        console.error('Error enviando audio a la API:', err);
-                        document.getElementById('voice-status-title').innerText = '❌ Error al procesar audio';
-                        document.getElementById('voice-status-subtitle').innerText = err.message;
-                        document.getElementById('voice-mic-btn').innerText = '⚠️';
-                        document.getElementById('voice-btn-new').style.display = 'inline-block';
-                    }
-                };
-            } catch (err) {
-                console.error('Error convirtiendo audio:', err);
-                alert('Error al empaquetar el audio: ' + err.message);
-                resetVoiceModalForNew();
-            }
-        }
-
-        async function sendVoiceTextFallback() {
-            const txt = document.getElementById('voice-text-fallback').value.trim();
-            if (!txt) return;
-
-            document.getElementById('voice-status-title').innerText = '🧠 Gemini procesando tu texto...';
-            document.getElementById('voice-status-subtitle').innerText = 'Actualizando base de datos en Turso...';
-
-            const customBackend = localStorage.getItem('vilco_backend_url') || '';
-            const endpoint = (customBackend ? customBackend : '') + '/api/voz';
-
-            try {
-                const res = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ texto: txt })
-                });
-
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const data = await res.json();
-                document.getElementById('voice-text-fallback').value = '';
-                handleVoiceSuccessResponse(data);
-            } catch (err) {
-                alert('Error al enviar texto: ' + err.message);
-                resetVoiceModalForNew();
-            }
-        }
-
-        function handleVoiceSuccessResponse(data) {
-            document.getElementById('voice-status-title').innerText = '✅ ¡Procesado con Éxito!';
-            document.getElementById('voice-status-subtitle').innerText = 'Acción registrada en las tablas de Turso Cloud.';
-            document.getElementById('voice-mic-btn').innerText = '✨';
-
-            // Mostrar caja de respuesta ejecutiva
-            const respBox = document.getElementById('voice-response-box');
-            const respTxt = document.getElementById('voice-response-text');
-            respTxt.innerText = data.respuesta || 'Instrucción procesada correctamente.';
-            respBox.style.display = 'block';
-
-            // Si vino audio sintetizado de gTTS, reproducirlo
-            if (data.audio_base64) {
-                const audioPlayerCont = document.getElementById('voice-audio-player-container');
-                const audioElem = document.getElementById('voice-audio-element');
-                audioElem.src = 'data:audio/mp3;base64,' + data.audio_base64;
-                audioPlayerCont.style.display = 'block';
-                audioElem.play().catch(e => console.log('Auto-play prevented by browser policy:', e));
-            }
-
-            document.getElementById('voice-btn-new').style.display = 'inline-block';
-
-            // Actualizar la lista de tareas en tiempo real
-            if (data.tareas && data.tareas.length >= 0) {
-                allTasks = data.tareas;
-                calculateMetricsAndRender();
-            } else {
-                loadDashboardData();
-            }
-        }
-
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         :root {
             --bg-main: #0B0F19;
@@ -2909,11 +2600,400 @@
         window.addEventListener('DOMContentLoaded', () => {
             loadDashboardData();
         });
+    
+
+        // =====================================================================
+        // MÓDULO DE VOZ Y ASISTENTE MULTIMODAL EN EL PORTAL WEB
+        // =====================================================================
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+        let recordStartTime = 0;
+        let recordTimerInterval = null;
+        let speechRecognition = null;
+        let currentTranscript = "";
+        let selectedAudioMimeType = "audio/webm";
+
+        function openVoiceModal() {
+            openModal('modal-voice');
+            resetVoiceModalForNew();
+        }
+
+        function closeVoiceModal() {
+            if (isRecording) {
+                cancelVoiceRecording();
+            }
+            closeModal('modal-voice');
+            const audioElem = document.getElementById('voice-audio-element');
+            if (audioElem) {
+                audioElem.pause();
+                audioElem.src = '';
+            }
+        }
+
+        function resetVoiceModalForNew() {
+            isRecording = false;
+            audioChunks = [];
+            currentTranscript = "";
+            clearInterval(recordTimerInterval);
+
+            const micBtn = document.getElementById('voice-mic-btn');
+            const wave = document.getElementById('voice-sound-wave');
+            if (micBtn) {
+                micBtn.className = 'mic-button';
+                micBtn.innerText = '🎙️';
+            }
+            if (wave) {
+                wave.className = 'sound-wave';
+            }
+
+            const title = document.getElementById('voice-status-title');
+            if (title) title.innerText = 'Presiona el micrófono para comenzar';
+            
+            const sub = document.getElementById('voice-status-subtitle');
+            if (sub) sub.innerText = 'Tiempo máximo por nota: 60 segundos';
+            
+            const timer = document.getElementById('voice-timer');
+            if (timer) {
+                timer.innerText = '00:00';
+                timer.style.color = '#38bdf8';
+            }
+
+            const liveTxt = document.getElementById('voice-live-text');
+            if (liveTxt) {
+                liveTxt.innerText = '"Presiona el micrófono y di, por ejemplo: 'Registra un requerimiento urgente para Operaciones: auditar clientes con consumo mayor a 500 kWh...'"';
+                liveTxt.style.color = '#94a3b8';
+            }
+
+            const btnStop = document.getElementById('voice-btn-stop');
+            if (btnStop) btnStop.style.display = 'none';
+
+            const btnCancel = document.getElementById('voice-btn-cancel');
+            if (btnCancel) btnCancel.style.display = 'none';
+
+            const btnNew = document.getElementById('voice-btn-new');
+            if (btnNew) btnNew.style.display = 'none';
+
+            const respBox = document.getElementById('voice-response-box');
+            if (respBox) respBox.style.display = 'none';
+
+            const playerCont = document.getElementById('voice-audio-player-container');
+            if (playerCont) playerCont.style.display = 'none';
+        }
+
+        async function toggleVoiceRecording() {
+            if (!isRecording) {
+                await startVoiceRecording();
+            } else {
+                stopVoiceRecording(true);
+            }
+        }
+
+        async function startVoiceRecording() {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert('Tu navegador no soporta captura de micrófono. Por favor usa Google Chrome, Microsoft Edge o Firefox.');
+                    return;
+                }
+
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioChunks = [];
+
+                selectedAudioMimeType = 'audio/webm';
+                let options = {};
+                if (window.MediaRecorder) {
+                    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                        selectedAudioMimeType = 'audio/webm;codecs=opus';
+                        options = { mimeType: 'audio/webm;codecs=opus' };
+                    } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+                        selectedAudioMimeType = 'audio/webm';
+                        options = { mimeType: 'audio/webm' };
+                    } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+                        selectedAudioMimeType = 'audio/ogg;codecs=opus';
+                        options = { mimeType: 'audio/ogg;codecs=opus' };
+                    } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                        selectedAudioMimeType = 'audio/mp4';
+                        options = { mimeType: 'audio/mp4' };
+                    }
+                }
+
+                mediaRecorder = new MediaRecorder(stream, options);
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) {
+                        audioChunks.push(e.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                mediaRecorder.start(200);
+                isRecording = true;
+                recordStartTime = Date.now();
+
+                // UI grabando
+                const micBtn = document.getElementById('voice-mic-btn');
+                const wave = document.getElementById('voice-sound-wave');
+                if (micBtn) {
+                    micBtn.className = 'mic-button recording';
+                    micBtn.innerText = '🔴';
+                }
+                if (wave) {
+                    wave.className = 'sound-wave recording';
+                }
+
+                document.getElementById('voice-status-title').innerText = 'Escuchando tu voz... Habla con claridad';
+                document.getElementById('voice-status-subtitle').innerText = 'Presiona "Detener y Procesar" al finalizar tu dictado';
+                document.getElementById('voice-btn-stop').style.display = 'inline-block';
+                document.getElementById('voice-btn-cancel').style.display = 'inline-block';
+
+                // Temporizador
+                recordTimerInterval = setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
+                    const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                    const secs = String(elapsed % 60).padStart(2, '0');
+                    document.getElementById('voice-timer').innerText = `${mins}:${secs}`;
+
+                    if (elapsed >= 60) {
+                        stopVoiceRecording(true);
+                    }
+                }, 500);
+
+                // Iniciar preview de reconocimiento de voz en navegadores Chrome / Edge
+                initSpeechRecognitionPreview();
+
+            } catch (err) {
+                console.error('Error accediendo al micrófono:', err);
+                const title = document.getElementById('voice-status-title');
+                if (title) title.innerText = '⚠️ Acceso al micrófono denegado';
+                alert('No se pudo acceder al micrófono: ' + err.message + '. Asegúrate de otorgar permisos en el navegador.');
+            }
+        }
+
+        function initSpeechRecognitionPreview() {
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRec) {
+                try {
+                    speechRecognition = new SpeechRec();
+                    speechRecognition.lang = 'es-PE';
+                    speechRecognition.continuous = true;
+                    speechRecognition.interimResults = true;
+
+                    speechRecognition.onresult = (event) => {
+                        let interim = '';
+                        for (let i = event.resultIndex; i < event.results.length; ++i) {
+                            if (event.results[i].isFinal) {
+                                currentTranscript += event.results[i][0].transcript + ' ';
+                            } else {
+                                interim += event.results[i][0].transcript;
+                            }
+                        }
+                        const fullText = (currentTranscript + ' ' + interim).trim();
+                        if (fullText) {
+                            const liveElem = document.getElementById('voice-live-text');
+                            if (liveElem) {
+                                liveElem.innerText = `"${fullText}"`;
+                                liveElem.style.color = '#38bdf8';
+                            }
+                        }
+                    };
+
+                    speechRecognition.onerror = (e) => {
+                        console.log('SpeechRecognition notice:', e.error);
+                    };
+
+                    speechRecognition.start();
+                } catch (e) {
+                    console.log('Speech recognition not available:', e);
+                }
+            }
+        }
+
+        function stopVoiceRecording(processWithAI = true) {
+            if (!isRecording) return;
+            isRecording = false;
+            clearInterval(recordTimerInterval);
+
+            if (speechRecognition) {
+                try { speechRecognition.stop(); } catch (e) {}
+            }
+
+            const micBtn = document.getElementById('voice-mic-btn');
+            const wave = document.getElementById('voice-sound-wave');
+            if (micBtn) {
+                micBtn.className = 'mic-button';
+                micBtn.innerText = '⏳';
+            }
+            if (wave) {
+                wave.className = 'sound-wave';
+            }
+
+            document.getElementById('voice-btn-stop').style.display = 'none';
+            document.getElementById('voice-btn-cancel').style.display = 'none';
+
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+
+            if (processWithAI) {
+                document.getElementById('voice-status-title').innerText = '🧠 Gemini procesando tu voz...';
+                document.getElementById('voice-status-subtitle').innerText = 'Catalogando requerimiento y actualizando Turso Cloud...';
+                
+                setTimeout(() => {
+                    const audioBlob = new Blob(audioChunks, { type: selectedAudioMimeType });
+                    sendAudioToGemini(audioBlob, selectedAudioMimeType, currentTranscript);
+                }, 350);
+            }
+        }
+
+        function cancelVoiceRecording() {
+            stopVoiceRecording(false);
+            resetVoiceModalForNew();
+        }
+
+        function getEffectiveApiBaseUrl() {
+            const customBackend = (localStorage.getItem('vilco_backend_url') || '').trim().replace(/\/+$/, '');
+            if (customBackend) return customBackend;
+            if (window.location.protocol === 'file:') return '';
+            return '';
+        }
+
+        async function sendAudioToGemini(audioBlob, mimeType, transcriptText) {
+            const apiBase = getEffectiveApiBaseUrl();
+            if (window.location.protocol === 'file:' && !apiBase) {
+                alert('Estás abriendo el portal en modo local (file://).\n\nPara procesar tu voz con Gemini y actualizar Turso Cloud, haz clic en "🔌 Conexión" e ingresa la URL de tu servicio en Render (ej: https://tu-servicio.onrender.com) o local (http://localhost:10000).');
+                resetVoiceModalForNew();
+                openConnectionModal();
+                return;
+            }
+
+            try {
+                const reader = new FileReader();
+                reader.readAsDataURL(audioBlob);
+                reader.onloadend = async () => {
+                    const base64Data = reader.result.split(',')[1];
+                    const endpoint = (apiBase || '') + '/api/voz';
+
+                    try {
+                        const res = await fetch(endpoint, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                audio_base64: base64Data,
+                                mime_type: mimeType,
+                                texto: transcriptText || ''
+                            })
+                        });
+
+                        if (!res.ok) {
+                            const errData = await res.json().catch(() => ({}));
+                            throw new Error(errData.error || errData.message || ('HTTP ' + res.status));
+                        }
+
+                        const data = await res.json();
+                        handleVoiceSuccessResponse(data);
+                    } catch (err) {
+                        console.error('Error enviando audio a /api/voz:', err);
+                        document.getElementById('voice-status-title').innerText = '❌ Error al procesar audio';
+                        document.getElementById('voice-status-subtitle').innerText = err.message;
+                        const micBtn = document.getElementById('voice-mic-btn');
+                        if (micBtn) micBtn.innerText = '⚠️';
+                        document.getElementById('voice-btn-new').style.display = 'inline-block';
+                    }
+                };
+            } catch (err) {
+                console.error('Error empaquetando audio:', err);
+                alert('Error al procesar el archivo de audio: ' + err.message);
+                resetVoiceModalForNew();
+            }
+        }
+
+        async function sendVoiceTextFallback() {
+            const txtArea = document.getElementById('voice-text-fallback');
+            const txt = txtArea ? txtArea.value.trim() : '';
+            if (!txt) {
+                alert('Por favor escribe tu instrucción antes de presionar enviar.');
+                return;
+            }
+
+            const apiBase = getEffectiveApiBaseUrl();
+            if (window.location.protocol === 'file:' && !apiBase) {
+                alert('Estás abriendo el portal en modo local (file://).\n\nPara procesar tu instrucción con Gemini y actualizar Turso Cloud, haz clic en "🔌 Conexión" e ingresa la URL de tu servicio en Render (ej: https://tu-servicio.onrender.com) o local (http://localhost:10000).');
+                openConnectionModal();
+                return;
+            }
+
+            document.getElementById('voice-status-title').innerText = '🧠 Gemini procesando tu instrucción...';
+            document.getElementById('voice-status-subtitle').innerText = 'Actualizando base de datos en Turso Cloud...';
+            const endpoint = (apiBase || '') + '/api/voz';
+
+            try {
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ texto: txt })
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.error || errData.message || ('HTTP ' + res.status));
+                }
+
+                const data = await res.json();
+                if (txtArea) txtArea.value = '';
+                handleVoiceSuccessResponse(data);
+            } catch (err) {
+                console.error('Error enviando texto a /api/voz:', err);
+                alert('Error al enviar la instrucción: ' + err.message);
+                resetVoiceModalForNew();
+            }
+        }
+
+        function handleVoiceSuccessResponse(data) {
+            document.getElementById('voice-status-title').innerText = '✨ ¡Procesado con Éxito!';
+            document.getElementById('voice-status-subtitle').innerText = 'Acción registrada en las tablas de Turso Cloud.';
+            const micBtn = document.getElementById('voice-mic-btn');
+            if (micBtn) micBtn.innerText = '✅';
+
+            // Mostrar caja de respuesta ejecutiva de la IA
+            const respBox = document.getElementById('voice-response-box');
+            const respTxt = document.getElementById('voice-response-text');
+            if (respTxt) {
+                respTxt.innerText = data.respuesta || 'Instrucción procesada correctamente en la base de datos.';
+            }
+            if (respBox) {
+                respBox.style.display = 'block';
+            }
+
+            // Reproducir audio de respuesta gTTS si vino sintetizado
+            if (data.audio_base64) {
+                const audioPlayerCont = document.getElementById('voice-audio-player-container');
+                const audioElem = document.getElementById('voice-audio-element');
+                if (audioPlayerCont && audioElem) {
+                    audioElem.src = 'data:audio/mp3;base64,' + data.audio_base64;
+                    audioPlayerCont.style.display = 'block';
+                    audioElem.play().catch(e => console.log('Auto-reproducción prevenida por política del navegador:', e));
+                }
+            }
+
+            const btnNew = document.getElementById('voice-btn-new');
+            if (btnNew) btnNew.style.display = 'inline-block';
+
+            // Actualizar datos del portal en tiempo real
+            if (data.tareas && Array.isArray(data.tareas)) {
+                allTasks = data.tareas;
+                calculateMetricsAndRender();
+            } else {
+                loadDashboardData();
+            }
+        }
+
     </script>
 
     <!-- Modal de Conexión de Datos (Render / Local / Turso Directo) -->
-    <div class="modal-backdrop" id="modal-connection">
-        <div class="modal" style="max-width: 600px;">
+    <div class="modal-overlay" id="modal-connection">
+        <div class="modal-box" style="max-width: 600px;">
             <div class="modal-header">
                 <div class="modal-title">
                     <span>🔌 Configurar Origen de Datos del Portal</span>
@@ -2981,8 +3061,8 @@
 
 
     <!-- Modal del Asistente de Voz Multimodal -->
-    <div class="modal-backdrop" id="modal-voice">
-        <div class="modal" style="max-width: 620px;">
+    <div class="modal-overlay" id="modal-voice">
+        <div class="modal-box" style="max-width: 620px;">
             <div class="modal-header">
                 <div class="modal-title">
                     <span>🎙️ Asistente de Voz VilcoSystem</span>
