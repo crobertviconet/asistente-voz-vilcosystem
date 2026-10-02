@@ -17,6 +17,7 @@ import json
 import asyncio
 import logging
 import threading
+import base64
 from typing import Optional, List, Dict, Any, Tuple
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
@@ -236,6 +237,41 @@ class VilcoPortalServerHandler(BaseHTTPRequestHandler):
             self._send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps({"status": "success", "tarea": res}, default=str).encode("utf-8"))
+            return
+
+        elif path in ("/api/voz", "/api/audio"):
+            try:
+                audio_b64 = data.get("audio_base64")
+                mime_type = data.get("mime_type", "audio/webm")
+                texto_dictado = data.get("texto")
+
+                if not audio_b64 and not texto_dictado:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self._send_cors_headers()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": "Se requiere audio_base64 o texto"}).encode("utf-8"))
+                    return
+
+                audio_bytes = base64.b64decode(audio_b64) if audio_b64 else None
+                resultado = procesar_instruccion_multimodal(
+                    audio_bytes=audio_bytes,
+                    mime_type=mime_type,
+                    texto=texto_dictado
+                )
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps(resultado, default=str).encode("utf-8"))
+            except Exception as e:
+                logger.exception(f"Error procesando voz en /api/voz: {e}")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
             return
 
         elif path == "/api/crear_solicitud":
@@ -692,6 +728,59 @@ def _synthesize_voice(text: str) -> io.BytesIO:
     buffer.seek(0)
     buffer.name = "response.mp3"
     return buffer
+
+
+def procesar_instruccion_multimodal(
+    audio_bytes: Optional[bytes] = None,
+    mime_type: str = "audio/webm",
+    texto: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Procesa notas de voz o instrucciones de texto provenientes del Portal Web o de Telegram.
+    Pasa la entrada a Gemini Multimodal con Function Calling activo para que cataloge o actualice tareas
+    directamente en las tablas de Turso Cloud (solicitudes_tareas, bitacora_avance, directorio_personal).
+    """
+    logger.info(f"Procesando instrucción web multimodal (audio_bytes={bool(audio_bytes)}, texto={bool(texto)})...")
+    contents = []
+
+    if audio_bytes:
+        clean_mime = mime_type.split(";")[0].strip().lower()
+        if not clean_mime or clean_mime == "audio/opus":
+            clean_mime = "audio/webm"
+        contents.append(types.Part.from_bytes(data=audio_bytes, mime_type=clean_mime))
+        prompt_context = "Escucha atentamente este audio de Cristian Villa dictado desde el Portal de Tareas de VilcoSystem. "
+        if texto:
+            prompt_context += f"Transcripción previa del navegador: '{texto}'. "
+        prompt_context += "Identifica la intención (registrar nueva solicitud, actualizar avance con query o consultar prioridades), cataloga adecuadamente y ejecuta la tool correspondiente."
+        contents.append(prompt_context)
+    elif texto:
+        contents.append(f"Instrucción de Cristian Villa desde el Portal de Tareas: {texto}")
+    else:
+        raise ValueError("Se requiere audio_bytes o texto para procesar la instrucción.")
+
+    # Ejecutar ciclo de razonamiento con Gemini y Function Calling
+    texto_respuesta = _run_gemini_turn(contents)
+
+    # Generar audio de respuesta con gTTS en base64 para reproducir en el navegador
+    audio_base64 = None
+    try:
+        audio_stream = _synthesize_voice(texto_respuesta)
+        audio_base64 = base64.b64encode(audio_stream.read()).decode("utf-8")
+    except Exception as e_tts:
+        logger.warning(f"No se pudo sintetizar voz de respuesta para el portal: {e_tts}")
+
+    # Obtener listado fresco de tareas y métricas de Turso Cloud
+    tareas_frescas = task_database.obtener_todas_las_tareas()
+    metricas_frescas = task_database.obtener_metricas_dashboard()
+
+    return {
+        "status": "success",
+        "respuesta": texto_respuesta,
+        "audio_base64": audio_base64,
+        "tareas": tareas_frescas,
+        "metricas": metricas_frescas,
+        "total_tareas": len(tareas_frescas)
+    }
 
 
 # =============================================================================
