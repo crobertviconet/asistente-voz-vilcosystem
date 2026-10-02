@@ -3,8 +3,9 @@
 =============================================================================
 VilcoSystem - Asistente Conversacional Decisional y Documental
 Líder Técnico: Cristian Villa
-Motor: Telegram Bot -> Gemini Multimodal (Fallback y Reintentos 503) -> gTTS
-Módulos: task_database (SQLite/Turso) + document_parser (Word/Excel/PDF/Scripts)
+Motor: Telegram Bot -> Gemini Multimodal (Fallback 503) -> gTTS
+Persistencia: Turso Cloud libSQL / SQLite Local
+Módulos: task_database (Directorio, Solicitudes, Bitácora) + document_parser
 =============================================================================
 """
 
@@ -93,32 +94,37 @@ except Exception as e:
     logger.exception(f"Error inicializando Google GenAI: {e}")
     sys.exit(1)
 
-# Cascada de modelos compatibles para tolerar saturaciones de servidores (503) o 404
+# Cascada de modelos compatibles para tolerar saturaciones de servidores (503)
 CANDIDATE_MODELS = [
     "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.5-flash",
-    "gemini-3-flash",
-    "gemini-2.5-flash"
+    "gemini-3-flash-preview",
+    "gemini-3-flash"
 ]
 
 SYSTEM_INSTRUCTION = (
     "Eres el Asistente Decisional y de Gestión Técnica de VilcoSystem, al servicio directo "
     "de Cristian Villa (Líder Técnico de VilcoSystem).\n\n"
     "Tus responsabilidades principales son:\n"
-    "1. RECEPCIÓN Y CATALOGACIÓN AUTOMÁTICA DE SOLICITUDES: Cristian te dictará por voz o texto "
+    "1. RECONOCIMIENTO Y GESTIÓN DE PERSONAL: VilcoSystem cuenta con un directorio de personal "
+    "(gerentes, subgerentes, jefaturas). Puedes registrar o actualizar personas usando registrar_personal "
+    "o consultar el directorio con consultar_directorio. Cuando Cristian mencione un nombre (ej. 'Valerio'), "
+    "consulta el directorio si es necesario para reconocer su cargo, área y nivel jerárquico.\n"
+    "2. RECEPCIÓN Y CATALOGACIÓN AUTOMÁTICA DE SOLICITUDES: Cristian te dictará por voz o texto "
     "los pedidos recibidos de distintas áreas, subgerentes y el Gerente General. Tú debes catalogar "
-    "automáticamente la jerarquía del solicitante, área, prioridad (URGENTE/ALTA/MEDIA/BAJA) y "
-    "criticidad (CRITICA/ALTA/MODERADA/LEVE) considerando el impacto en el negocio (ej. corte de servicios, "
-    "recaudación, auditoría o facturación son CRÍTICOS). Guarda la solicitud llamando a la función registrar_solicitud.\n"
-    "2. ASESORÍA DECISIONAL ('¿Cuál atender primero y por qué?'): Cuando Cristian te pregunte qué atender primero, "
+    "automáticamente el solicitante, cargo, área, prioridad (URGENTE/ALTA/MEDIA/BAJA) y criticidad "
+    "(CRITICA/ALTA/MODERADA/LEVE) considerando el impacto en el negocio (corte de servicios, recaudación, "
+    "facturación o auditorías son CRÍTICOS). Guarda la solicitud llamando a registrar_solicitud.\n"
+    "3. ASESORÍA DECISIONAL ('¿Cuál atender primero y por qué?'): Cuando Cristian te pregunte qué atender primero, "
     "consulta las tareas pendientes llamando a consultar_prioridades y calcula la mejor recomendación ponderando: "
     "(a) Jerarquía (Gerente General > Subgerente > Jefes > Operativo), (b) Criticidad de negocio, "
     "(c) Plazos y dependencias. Explica con claridad el motivo de tu sugerencia.\n"
-    "3. BITÁCORA Y QUERIES TÉCNICAS: Permite actualizar el avance de cada pedido registrando comentarios, "
+    "4. BITÁCORA Y QUERIES TÉCNICAS: Permite actualizar el avance de cada pedido registrando comentarios, "
     "queries SQL ejecutadas o scripts, porcentajes de avance y cambio de estados (EN_PROCESO, BLOQUEADO, COMPLETADO).\n"
-    "4. CONSULTA DOCUMENTAL: Cuando Cristian pregunte por el contenido de un archivo adjunto (Word, Excel, Script, PDF) "
+    "5. CONSULTA DOCUMENTAL: Cuando Cristian pregunte por el contenido de un archivo adjunto (Word, Excel, Script, PDF) "
     "relacionado a un pedido, llama a consultar_documento_tarea para inspeccionar el texto extraído y responder con exactitud.\n"
-    "5. REPORTES POR FECHAS: Cuando solicite resúmenes de tareas realizadas o en curso en un rango de fechas, "
+    "6. REPORTES POR FECHAS: Cuando solicite resúmenes de tareas realizadas o en curso en un rango de fechas, "
     "llama a generar_reporte_periodo y entrega un informe ejecutivo claro.\n\n"
     "Estilo de respuesta: Profesional, ejecutivo, directo y conversacional en español, ideal para ser escuchado en audio. "
     "Evita markdown confuso que suene mal al sintetizarse a voz."
@@ -201,12 +207,39 @@ tool_generar_reporte_periodo = {
     }
 }
 
+tool_registrar_personal = {
+    "name": "registrar_personal",
+    "description": "Registra o actualiza a un miembro del equipo de VilcoSystem (gerentes, subgerentes, jefaturas) en el directorio.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "nombre": {"type": "STRING", "description": "Nombre de la persona (ej. Valerio, Ing. Carlos Mendoza)"},
+            "cargo": {"type": "STRING", "description": "Cargo institucional (ej. Gerente General, Subgerente de Operaciones, Jefe de Facturacion)"},
+            "nivel_jerarquico": {
+                "type": "INTEGER",
+                "description": "Nivel jerárquico: 1 (Gerente General), 2 (Subgerente), 3 (Jefatura), 4 (Operativo)"
+            },
+            "area": {"type": "STRING", "description": "Área de la empresa (ej. Gerencia, Operaciones, TI, Finanzas)"},
+            "contacto": {"type": "STRING", "description": "Opcional: teléfono o email"}
+        },
+        "required": ["nombre", "cargo", "area"]
+    }
+}
+
+tool_consultar_directorio = {
+    "name": "consultar_directorio",
+    "description": "Consulta la lista de personas y cargos registrados en el directorio institucional de VilcoSystem.",
+    "parameters": {"type": "OBJECT", "properties": {}}
+}
+
 AVAILABLE_TOOLS = [
     tool_registrar_solicitud,
     tool_actualizar_avance,
     tool_consultar_prioridades,
     tool_consultar_documento_tarea,
-    tool_generar_reporte_periodo
+    tool_generar_reporte_periodo,
+    tool_registrar_personal,
+    tool_consultar_directorio
 ]
 
 
@@ -214,7 +247,6 @@ AVAILABLE_TOOLS = [
 # Ejecutor Local de Tools
 # =============================================================================
 def execute_tool_call(tool_name: str, args: Dict[str, Any]) -> Any:
-    """Ejecuta la función Python correspondiente al Tool Call emitido por Gemini."""
     logger.info(f"Ejecutando tool '{tool_name}' con argumentos: {args}")
     try:
         if tool_name == "registrar_solicitud":
@@ -281,6 +313,20 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any]) -> Any:
             )
             return {"status": "success", "total": len(reporte), "reporte": reporte}
 
+        elif tool_name == "registrar_personal":
+            res = task_database.guardar_personal(
+                nombre=args.get("nombre", ""),
+                cargo=args.get("cargo", ""),
+                nivel_jerarquico=args.get("nivel_jerarquico", 3),
+                area=args.get("area", "GENERAL"),
+                contacto=args.get("contacto")
+            )
+            return {"status": "success", "miembro_registrado": res}
+
+        elif tool_name == "consultar_directorio":
+            directorio = task_database.listar_directorio()
+            return {"status": "success", "total_miembros": len(directorio), "directorio": directorio}
+
         else:
             return {"status": "error", "message": f"Tool '{tool_name}' desconocida"}
     except Exception as e:
@@ -289,13 +335,9 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any]) -> Any:
 
 
 # =============================================================================
-# Invocación con Reintentos y Cascada de Fallback (Tolerancia a 503 / 429)
+# Invocación con Reintentos y Cascada de Fallback (Tolerancia a 503)
 # =============================================================================
 def _generate_with_fallback(contents: List[Any], config: types.GenerateContentConfig) -> Tuple[Any, str]:
-    """
-    Invoca Gemini probando secuencialmente la lista de modelos compatibles.
-    Si un modelo responde 503 (servidor sobrecargado) o 429, reintenta y pasa al siguiente modelo alternativo.
-    """
     last_error = None
     for model_name in CANDIDATE_MODELS:
         for attempt in range(2):
@@ -311,25 +353,17 @@ def _generate_with_fallback(contents: List[Any], config: types.GenerateContentCo
             except Exception as e:
                 err_str = str(e)
                 last_error = e
-                logger.warning(f"Excepción con modelo '{model_name}' (intento {attempt + 1}): {err_str[:120]}")
-
-                # Si el modelo no existe o está retirado, saltar inmediatamente al siguiente
+                logger.warning(f"Excepción con modelo '{model_name}': {err_str[:120]}")
                 if "404" in err_str or "NOT_FOUND" in err_str:
                     break
-
-                # Si es sobrecarga temporal (503 UNAVAILABLE) o rate limit (429), esperar 1.2s antes de reintentar
                 if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
                     time.sleep(1.2)
                     continue
 
-    raise RuntimeError(
-        f"Todos los modelos de Gemini están experimentando alta demanda o fallaron temporalmente. "
-        f"Último error: {last_error}"
-    )
+    raise RuntimeError(f"Servidores de Gemini ocupados temporalmente. Último error: {last_error}")
 
 
 def _run_gemini_turn(input_contents: List[Any]) -> str:
-    """Ejecuta una conversación con Gemini manejando bucles de Tool Calls y tolerancia a fallos."""
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_INSTRUCTION,
         temperature=0.4,
@@ -369,7 +403,6 @@ def _run_gemini_turn(input_contents: List[Any]) -> str:
 
 
 def _synthesize_voice(text: str) -> io.BytesIO:
-    """Sintetiza texto a audio MP3 con gTTS."""
     clean_text = text.replace("*", "").replace("#", "").replace("`", "").replace("_", "").strip()
     if not clean_text:
         clean_text = "He procesado tu requerimiento correctamente."
@@ -389,11 +422,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     welcome_text = (
         "👋 ¡Bienvenido, Cristian! Soy tu **Asistente Decisional y de Gestión Técnica de VilcoSystem**.\n\n"
         "🎙️ **Capacidades habilitadas:**\n"
-        "1. **Recepción por Voz:** Dicta las solicitudes de Gerencia o Subgerentes. Las catalogaré automáticamente en prioridad y criticidad.\n"
-        "2. **Asesoría de Prioridades:** Pregúntame *'¿Qué debo atender primero y por qué?'* y te daré el análisis ponderado.\n"
-        "3. **Bitácora y Queries:** Dicta el avance de tus tareas, consultas SQL ejecutadas o estados.\n"
-        "4. **Recepción Documental:** Envíame archivos de Word, Excel, Scripts (.sql, .py) o PDFs para indexarlos a tus pedidos y hacerles preguntas.\n"
-        "5. **Reportes:** Pídeme resúmenes ejecutivos por rango de fechas."
+        "1. **Directorio y Organigrama:** Registra a gerentes y jefaturas (ej. *'Registra a Valerio como Subgerente de Operaciones'*).\n"
+        "2. **Recepción por Voz:** Dicta los pedidos recibidos. Reconoceré al solicitante y catalogaré prioridad y criticidad.\n"
+        "3. **Asesoría de Prioridades:** Pregúntame *'¿Qué debo atender primero y por qué?'*.\n"
+        "4. **Bitácora y Queries:** Dicta avances, queries SQL o estados.\n"
+        "5. **Recepción Documental:** Adjunta archivos Word, Excel, Scripts o PDF para analizarlos.\n"
+        "6. **Reportes:** Solicita resúmenes ejecutivos por rango de fechas."
     )
     await update.message.reply_text(welcome_text, parse_mode=constants.ParseMode.MARKDOWN)
 
@@ -404,7 +438,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not voice_obj:
         return
 
-    logger.info(f"Nota de voz recibida (duración: {voice_obj.duration}s)...")
+    logger.info(f"Nota de voz recibida ({voice_obj.duration}s)...")
     await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
 
     try:
@@ -414,14 +448,12 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_chat_action(action=constants.ChatAction.TYPING)
         contents = [
             types.Part.from_bytes(data=audio_bytes, mime_type="audio/ogg"),
-            "Escucha este audio de Cristian Villa y ejecuta las acciones necesarias (catalogar solicitud, actualizar avance, asesorar prioridad o responder)."
+            "Escucha este audio de Cristian Villa y ejecuta las acciones requeridas."
         ]
         ai_response_text = await asyncio.to_thread(_run_gemini_turn, contents)
 
-        # Enviar respuesta de texto
         await message.reply_text(ai_response_text, reply_to_message_id=message.message_id)
 
-        # Enviar audio sintetizado
         try:
             await message.reply_chat_action(action=constants.ChatAction.RECORD_VOICE)
             voice_buf = await asyncio.to_thread(_synthesize_voice, ai_response_text)
@@ -438,11 +470,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.exception(f"Error procesando nota de voz: {e}")
         err_str = str(e)
         if "503" in err_str or "UNAVAILABLE" in err_str:
-            friendly_msg = "⚠️ Los servidores de Google Gemini están experimentando una saturación temporal de alta demanda (Error 503). Por favor reenvía tu audio en 10-15 segundos."
+            friendly_msg = "⚠️ Los servidores de Google Gemini están experimentando una saturación temporal (503). Por favor reenvía tu audio en 10-15 segundos."
         elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-            friendly_msg = "⚠️ Se ha alcanzado el límite de cuota temporal de la API. Por favor espera unos momentos e intenta de nuevo."
+            friendly_msg = "⚠️ Límite de cuota temporal alcanzado en la API. Por favor espera unos momentos."
         else:
-            friendly_msg = f"⚠️ Ocurrió una incidencia al procesar tu solicitud:\n{err_str[:250]}"
+            friendly_msg = f"⚠️ Ocurrió una incidencia:\n{err_str[:250]}"
 
         await message.reply_text(friendly_msg, reply_to_message_id=message.message_id)
 
@@ -470,9 +502,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.exception(f"Error en mensaje de texto: {e}")
         err_str = str(e)
         if "503" in err_str or "UNAVAILABLE" in err_str:
-            friendly_msg = "⚠️ Los servidores de Google Gemini están experimentando una saturación temporal de alta demanda (Error 503). Por favor reenvía tu mensaje en 10-15 segundos."
+            friendly_msg = "⚠️ Los servidores de Google Gemini están experimentando una saturación temporal (503). Por favor reenvía tu mensaje en 10-15 segundos."
         elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-            friendly_msg = "⚠️ Límite de cuota temporal alcanzado en la API. Por favor espera unos momentos."
+            friendly_msg = "⚠️ Límite de cuota alcanzado en la API. Por favor espera un momento."
         else:
             friendly_msg = f"⚠️ Ocurrió una incidencia: {err_str[:250]}"
 
@@ -541,7 +573,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 def main() -> None:
-    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (Resiliente a 503)...")
+    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (v10 Directorio)...")
     http_thread = threading.Thread(target=start_health_server, args=(PORT,), daemon=True)
     http_thread.start()
 

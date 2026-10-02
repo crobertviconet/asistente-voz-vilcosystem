@@ -2,7 +2,7 @@
 """
 =============================================================================
 VilcoSystem - Motor de Base de Datos Híbrido (SQLite Local + Turso libSQL Cloud)
-Manejo de Solicitudes, Jerarquías, Bitácora de Queries y Documentos
+Manejo de Solicitudes, Jerarquías, Bitácora de Queries, Documentos y Directorio
 Arquitectura: LibSQLConnectionWrapper + LibSQLRow para compatibilidad total
 =============================================================================
 """
@@ -152,15 +152,22 @@ def get_db_connection():
     if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
         try:
             import libsql
+            db_url = TURSO_DATABASE_URL.strip()
+            if db_url.lower().startswith('libsql://'):
+                db_url = 'libsql://' + db_url[9:]
+            
+            auth_token = TURSO_AUTH_TOKEN.strip()
+            if auth_token.startswith('EyJ'):
+                auth_token = 'eyJ' + auth_token[3:]
+
             raw_conn = libsql.connect(
-                database=TURSO_DATABASE_URL,
-                auth_token=TURSO_AUTH_TOKEN
+                database=db_url,
+                auth_token=auth_token
             )
             return LibSQLConnectionWrapper(raw_conn)
         except Exception as e:
             logger.warning(f"Error conectando a Turso Cloud ({e}). Fallback a SQLite local.")
 
-    # Conexión local estándar SQLite
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 30000;")
@@ -170,7 +177,7 @@ def get_db_connection():
 
 
 def init_db() -> None:
-    """Inicializa las tablas relacionales de la base de datos de forma idempotente."""
+    """Inicializa las 4 tablas relacionales de la base de datos de forma idempotente."""
     try:
         with get_db_connection() as conn:
             conn.executescript("""
@@ -213,12 +220,77 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (tarea_id) REFERENCES solicitudes_tareas(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS directorio_personal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT NOT NULL UNIQUE,
+                cargo TEXT NOT NULL,
+                nivel_jerarquico INTEGER DEFAULT 3,
+                area TEXT NOT NULL,
+                contacto TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
             """)
-        logger.info("Base de datos inicializada correctamente.")
+        logger.info("Base de datos inicializada correctamente con las 4 tablas principales.")
     except Exception as e:
         logger.exception(f"Error inicializando base de datos: {e}")
 
 
+# =============================================================================
+# Gestión de Directorio de Personal / Organigrama
+# =============================================================================
+def guardar_personal(
+    nombre: str,
+    cargo: str,
+    nivel_jerarquico: int = 3,
+    area: str = "GENERAL",
+    contacto: Optional[str] = None
+) -> Dict[str, Any]:
+    """Registra o actualiza un miembro del personal en el directorio de VilcoSystem."""
+    nombre_limpio = nombre.strip()
+    with get_db_connection() as conn:
+        # Upsert (insert or update si ya existe por nombre)
+        existente = conn.execute("SELECT id FROM directorio_personal WHERE LOWER(nombre) = LOWER(?);", (nombre_limpio,)).fetchone()
+        if existente:
+            conn.execute("""
+                UPDATE directorio_personal 
+                SET cargo = ?, nivel_jerarquico = ?, area = ?, contacto = ?
+                WHERE id = ?;
+            """, (cargo, nivel_jerarquico, area, contacto, existente["id"]))
+            p_id = existente["id"]
+        else:
+            cursor = conn.execute("""
+                INSERT INTO directorio_personal (nombre, cargo, nivel_jerarquico, area, contacto)
+                VALUES (?, ?, ?, ?, ?);
+            """, (nombre_limpio, cargo, nivel_jerarquico, area, contacto))
+            p_id = cursor.lastrowid
+
+        row = conn.execute("SELECT * FROM directorio_personal WHERE id = ?;", (p_id,)).fetchone()
+        return dict(row)
+
+
+def buscar_personal(nombre_o_termino: str) -> Optional[Dict[str, Any]]:
+    """Busca en el directorio a una persona por coincidencia de nombre."""
+    termino = f"%{nombre_o_termino.strip()}%"
+    with get_db_connection() as conn:
+        row = conn.execute("""
+            SELECT * FROM directorio_personal 
+            WHERE nombre LIKE ? OR cargo LIKE ?
+            ORDER BY nivel_jerarquico ASC LIMIT 1;
+        """, (termino, termino)).fetchone()
+        return dict(row) if row else None
+
+
+def listar_directorio() -> List[Dict[str, Any]]:
+    """Retorna todo el personal registrado ordenado por nivel jerárquico."""
+    with get_db_connection() as conn:
+        rows = conn.execute("SELECT * FROM directorio_personal ORDER BY nivel_jerarquico ASC, nombre ASC;").fetchall()
+        return [dict(r) for r in rows]
+
+
+# =============================================================================
+# Gestión de Solicitudes y Tareas
+# =============================================================================
 def generar_siguiente_id() -> str:
     """Genera un código correlativo legible como REQ-001, REQ-002."""
     with get_db_connection() as conn:
@@ -245,7 +317,16 @@ def crear_solicitud(
     justificacion_ia: str = "",
     fecha_limite: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Registra una nueva solicitud y retorna el registro creado."""
+    """Registra una nueva solicitud vinculando automáticamente los datos del directorio de personal."""
+    # Verificar si el solicitante ya está registrado en el directorio
+    miembro = buscar_personal(solicitante)
+    if miembro:
+        # Auto-completar cargo y área si vinieran vacíos o genéricos
+        if cargo_solicitante in ["OPERATIVO", "OTRO", "", None]:
+            cargo_solicitante = miembro["cargo"]
+        if area in ["GENERAL", "", None]:
+            area = miembro["area"]
+
     req_id = generar_siguiente_id()
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -401,24 +482,27 @@ def obtener_tareas_pendientes() -> List[Dict[str, Any]]:
     """Retorna todas las tareas en curso o pendientes ordenadas por impacto y jerarquía."""
     with get_db_connection() as conn:
         rows = conn.execute("""
-            SELECT * FROM solicitudes_tareas 
-            WHERE estado IN ('PENDIENTE', 'EN_PROCESO', 'BLOQUEADO', 'REVISION')
+            SELECT s.*, COALESCE(d.nivel_jerarquico, 3) as orden_jerarquia
+            FROM solicitudes_tareas s
+            LEFT JOIN directorio_personal d ON LOWER(s.solicitante) = LOWER(d.nombre)
+            WHERE s.estado IN ('PENDIENTE', 'EN_PROCESO', 'BLOQUEADO', 'REVISION')
             ORDER BY 
-                CASE prioridad
+                CASE s.prioridad
                     WHEN 'URGENTE' THEN 1
                     WHEN 'ALTA' THEN 2
                     WHEN 'MEDIA' THEN 3
                     WHEN 'BAJA' THEN 4
                     ELSE 5
                 END ASC,
-                CASE criticidad
+                CASE s.criticidad
                     WHEN 'CRITICA' THEN 1
                     WHEN 'ALTA' THEN 2
                     WHEN 'MODERADA' THEN 3
                     WHEN 'LEVE' THEN 4
                     ELSE 5
                 END ASC,
-                created_at ASC;
+                orden_jerarquia ASC,
+                s.created_at ASC;
         """).fetchall()
         return [dict(r) for r in rows]
 
