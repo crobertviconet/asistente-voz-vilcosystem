@@ -3,7 +3,7 @@
 =============================================================================
 VilcoSystem - Asistente Conversacional Decisional y Documental
 Líder Técnico: Cristian Villa
-Motor: Telegram Bot -> Gemini Multimodal (Fallback 503) -> gTTS
+Motor: Telegram Bot -> Gemini Multimodal (Auto-Discovery + Resiliencia 503) -> gTTS
 Persistencia: Turso Cloud libSQL / SQLite Local
 Módulos: task_database (Directorio, Solicitudes, Bitácora) + document_parser
 =============================================================================
@@ -94,14 +94,64 @@ except Exception as e:
     logger.exception(f"Error inicializando Google GenAI: {e}")
     sys.exit(1)
 
-# Cascada de modelos compatibles para tolerar saturaciones de servidores (503)
-CANDIDATE_MODELS = [
+
+# =============================================================================
+# Descubrimiento Dinámico de Modelos Activos (Auto-Discovery)
+# =============================================================================
+DEFAULT_FALLBACK_MODELS = [
     "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-3-flash"
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-pro"
 ]
+
+ACTIVE_MODELS_CACHE: List[str] = []
+
+
+def rank_model(name: str) -> int:
+    """Prioriza modelos rápidos (Flash 3.8/3.5) y luego modelos de alta capacidad (Pro)."""
+    n = name.lower()
+    if "3.8-flash" in n:
+        return 1
+    if "flash" in n and "3" in n:
+        return 2
+    if "3.1-pro" in n or "3-pro" in n:
+        return 3
+    if "2.5-pro" in n:
+        return 4
+    if "flash" in n:
+        return 5
+    return 10
+
+
+def discover_active_models() -> List[str]:
+    """Consulta la API de Google para detectar qué modelos están activos y disponibles."""
+    global ACTIVE_MODELS_CACHE
+    if ACTIVE_MODELS_CACHE:
+        return ACTIVE_MODELS_CACHE
+
+    try:
+        logger.info("Descubriendo modelos activos en la cuenta de Google AI Studio...")
+        available = []
+        for m in gemini_client.models.list():
+            m_name = m.name.replace("models/", "")
+            # Descartar modelos de embedding, imagen pura o experimentales no conversacionales
+            if "gemini" in m_name and not any(x in m_name for x in ["embedding", "imagen", "veo", "lyria"]):
+                # Descartar versiones retiradas que sabemos que dan 404
+                if not any(deprecated in m_name for deprecated in ["2.0-flash", "2.5-flash", "1.5-flash"]):
+                    available.append(m_name)
+
+        if available:
+            sorted_models = sorted(available, key=rank_model)
+            logger.info(f"Modelos descubiertos y priorizados: {sorted_models}")
+            ACTIVE_MODELS_CACHE = sorted_models
+            return sorted_models
+    except Exception as e:
+        logger.warning(f"No se pudo consultar list_models ({e}). Usando lista por defecto.")
+
+    ACTIVE_MODELS_CACHE = DEFAULT_FALLBACK_MODELS
+    return DEFAULT_FALLBACK_MODELS
+
 
 SYSTEM_INSTRUCTION = (
     "Eres el Asistente Decisional y de Gestión Técnica de VilcoSystem, al servicio directo "
@@ -110,12 +160,12 @@ SYSTEM_INSTRUCTION = (
     "1. RECONOCIMIENTO Y GESTIÓN DE PERSONAL: VilcoSystem cuenta con un directorio de personal "
     "(gerentes, subgerentes, jefaturas). Puedes registrar o actualizar personas usando registrar_personal "
     "o consultar el directorio con consultar_directorio. Cuando Cristian mencione un nombre (ej. 'Valerio'), "
-    "consulta el directorio si es necesario para reconocer su cargo, área y nivel jerárquico.\n"
+    "reconoce su cargo, área y nivel jerárquico.\n"
     "2. RECEPCIÓN Y CATALOGACIÓN AUTOMÁTICA DE SOLICITUDES: Cristian te dictará por voz o texto "
     "los pedidos recibidos de distintas áreas, subgerentes y el Gerente General. Tú debes catalogar "
     "automáticamente el solicitante, cargo, área, prioridad (URGENTE/ALTA/MEDIA/BAJA) y criticidad "
-    "(CRITICA/ALTA/MODERADA/LEVE) considerando el impacto en el negocio (corte de servicios, recaudación, "
-    "facturación o auditorías son CRÍTICOS). Guarda la solicitud llamando a registrar_solicitud.\n"
+    "(CRITICA/ALTA/MODERADA/LEVE) considerando el impacto en el negocio (corte de servicios, facturación "
+    "o recaudación son CRÍTICOS). Guarda la solicitud llamando a registrar_solicitud.\n"
     "3. ASESORÍA DECISIONAL ('¿Cuál atender primero y por qué?'): Cuando Cristian te pregunte qué atender primero, "
     "consulta las tareas pendientes llamando a consultar_prioridades y calcula la mejor recomendación ponderando: "
     "(a) Jerarquía (Gerente General > Subgerente > Jefes > Operativo), (b) Criticidad de negocio, "
@@ -335,12 +385,19 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any]) -> Any:
 
 
 # =============================================================================
-# Invocación con Reintentos y Cascada de Fallback (Tolerancia a 503)
+# Invocación con Reintentos Progresivos y Fallback Dinámico
 # =============================================================================
 def _generate_with_fallback(contents: List[Any], config: types.GenerateContentConfig) -> Tuple[Any, str]:
+    """
+    Ejecuta la llamada a Gemini utilizando modelos descubiertos dinámicamente.
+    Aplica reintentos progresivos (backoff) ante 503/429 y conmuta entre modelos activos.
+    """
+    models_to_try = discover_active_models()
     last_error = None
-    for model_name in CANDIDATE_MODELS:
-        for attempt in range(2):
+
+    for model_name in models_to_try:
+        # Hasta 3 reintentos con backoff progresivo (1.5s, 3.0s)
+        for attempt in range(3):
             try:
                 logger.info(f"Llamando a Gemini con modelo '{model_name}' (intento {attempt + 1})...")
                 response = gemini_client.models.generate_content(
@@ -353,14 +410,22 @@ def _generate_with_fallback(contents: List[Any], config: types.GenerateContentCo
             except Exception as e:
                 err_str = str(e)
                 last_error = e
-                logger.warning(f"Excepción con modelo '{model_name}': {err_str[:120]}")
+                logger.warning(f"Error con modelo '{model_name}' (intento {attempt + 1}): {err_str[:120]}")
+
+                # Si el modelo no existe o está retirado (404), pasar de inmediato al siguiente
                 if "404" in err_str or "NOT_FOUND" in err_str:
                     break
-                if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
-                    time.sleep(1.2)
-                    continue
 
-    raise RuntimeError(f"Servidores de Gemini ocupados temporalmente. Último error: {last_error}")
+                # Si es sobrecarga temporal (503 UNAVAILABLE) o cuota (429), pausar antes de reintentar
+                if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
+                    sleep_time = 1.5 * (attempt + 1)
+                    logger.info(f"Pausa defensiva de {sleep_time}s por alta demanda...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    break
+
+    raise RuntimeError(f"Servicio temporalmente saturado en Google Cloud. Último error: {last_error}")
 
 
 def _run_gemini_turn(input_contents: List[Any]) -> str:
@@ -573,9 +638,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 def main() -> None:
-    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (v10 Directorio)...")
+    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (v11 Auto-Discovery)...")
     http_thread = threading.Thread(target=start_health_server, args=(PORT,), daemon=True)
     http_thread.start()
+
+    # Descubrir modelos activos al inicio
+    discover_active_models()
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
