@@ -972,7 +972,13 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
     logger.info("Polling de Telegram iniciado. Escuchando eventos...")
-    app.run_polling(drop_pending_updates=True)
+    try:
+        app.run_polling(drop_pending_updates=True)
+    except Exception as e_poll:
+        logger.warning(f"Aviso en polling de Telegram: {e_poll}. Manteniendo servidor HTTP activo.")
+        # Mantener el hilo principal vivo si run_polling finaliza
+        while True:
+            time.sleep(10)
 
 
 if __name__ == "__main__":
