@@ -1735,6 +1735,7 @@
         function openConnectionModal() {
             document.getElementById('modal-connection').classList.add('active');
             document.getElementById('cfg-backend-url').value = localStorage.getItem('vilco_backend_url') || '';
+            document.getElementById('cfg-gemini-key').value = localStorage.getItem('vilco_gemini_key') || '';
             document.getElementById('cfg-turso-url').value = localStorage.getItem('turso_db_url') || 'libsql://asistentetareas-crobertviconet.turso.io';
             document.getElementById('cfg-turso-token').value = localStorage.getItem('turso_auth_token') || '';
             switchConnectionTab(activeConnMode);
@@ -1765,6 +1766,8 @@
 
         function resetConnectionConfig() {
             localStorage.removeItem('vilco_backend_url');
+            localStorage.removeItem('vilco_gemini_key');
+            document.getElementById('cfg-gemini-key').value = '';
             localStorage.removeItem('turso_db_url');
             localStorage.removeItem('turso_auth_token');
             localStorage.removeItem('vilco_conn_mode');
@@ -1788,6 +1791,9 @@
             if (activeConnMode === 'render') {
                 const bUrl = document.getElementById('cfg-backend-url').value.trim().replace(/\/+$/, '');
                 localStorage.setItem('vilco_backend_url', bUrl);
+                const gKey = document.getElementById('cfg-gemini-key').value.trim();
+                if (gKey) localStorage.setItem('vilco_gemini_key', gKey);
+                else localStorage.removeItem('vilco_gemini_key');
                 try {
                     const testUrl = (bUrl || '') + '/api/tareas';
                     const res = await fetch(testUrl);
@@ -2882,7 +2888,8 @@
                             body: JSON.stringify({
                                 audio_base64: base64Data,
                                 mime_type: mimeType,
-                                texto: transcriptText || ''
+                                texto: transcriptText || '',
+                                gemini_api_key: localStorage.getItem('vilco_gemini_key') || ''
                             })
                         });
 
@@ -2896,7 +2903,12 @@
                     } catch (err) {
                         console.error('Error enviando audio a /api/voz:', err);
                         document.getElementById('voice-status-title').innerText = '❌ Error al procesar audio';
-                        document.getElementById('voice-status-subtitle').innerText = err.message;
+                        let errMsg = err.message || '';
+                        if (errMsg.includes('GEMINI_API_KEY')) {
+                            document.getElementById('voice-status-subtitle').innerHTML = errMsg + '<br><button class="btn btn-primary" style="margin-top:8px;font-size:12px;padding:4px 12px;" onclick="closeVoiceModal(); openConnectionModal();">🔑 Configurar Gemini API Key</button>';
+                        } else {
+                            document.getElementById('voice-status-subtitle').innerText = errMsg;
+                        }
                         const micBtn = document.getElementById('voice-mic-btn');
                         if (micBtn) micBtn.innerText = '⚠️';
                         document.getElementById('voice-btn-new').style.display = 'inline-block';
@@ -2932,7 +2944,10 @@
                 const res = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ texto: txt })
+                    body: JSON.stringify({
+                        texto: txt,
+                        gemini_api_key: localStorage.getItem('vilco_gemini_key') || ''
+                    })
                 });
 
                 if (!res.ok) {
@@ -3016,6 +3031,13 @@
 
                 <!-- Panel 1: Render / Local -->
                 <div id="conn-panel-render">
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label class="form-label">Clave de API de Gemini (GEMINI_API_KEY):</label>
+                        <input type="password" id="cfg-gemini-key" class="form-control" placeholder="AIzaSy... (Opcional si ya está configurada en Render)" />
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                            Permite al Asistente de Voz procesar audios y catalogar solicitudes con IA si Render aún no tiene la variable definida.
+                        </div>
+                    </div>
                     <div class="form-group">
                         <label class="form-label">URL del Backend (Render o Local):</label>
                         <input type="text" id="cfg-backend-url" class="form-control" placeholder="https://tu-servicio.onrender.com o http://localhost:10000" />

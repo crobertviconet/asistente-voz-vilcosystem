@@ -244,6 +244,7 @@ class VilcoPortalServerHandler(BaseHTTPRequestHandler):
                 audio_b64 = data.get("audio_base64")
                 mime_type = data.get("mime_type", "audio/webm")
                 texto_dictado = data.get("texto")
+                api_key = data.get("gemini_api_key") or data.get("api_key")
 
                 if not audio_b64 and not texto_dictado:
                     self.send_response(400)
@@ -257,7 +258,8 @@ class VilcoPortalServerHandler(BaseHTTPRequestHandler):
                 resultado = procesar_instruccion_multimodal(
                     audio_bytes=audio_bytes,
                     mime_type=mime_type,
-                    texto=texto_dictado
+                    texto=texto_dictado,
+                    gemini_api_key=api_key
                 )
 
                 self.send_response(200)
@@ -326,16 +328,31 @@ from gtts import gTTS
 
 gemini_client = None
 
-def get_gemini_client():
+def get_gemini_client(api_key: Optional[str] = None):
     global gemini_client
-    if gemini_client is None:
-        key = os.getenv("GEMINI_API_KEY")
-        if key:
-            try:
-                gemini_client = genai.Client(api_key=key)
-                logger.info("Cliente de Google GenAI inicializado con éxito.")
-            except Exception as e:
-                logger.error(f"Error inicializando Google GenAI: {e}")
+    
+    # 1. Priorizar clave pasada explícitamente en la petición
+    key = api_key
+    
+    # 2. Si no, buscar en variables de entorno con múltiples alias y limpieza de comillas
+    if not key:
+        for var_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY", "GOOGLE_GENAI_API_KEY"):
+            val = os.getenv(var_name)
+            if val and val.strip():
+                key = val.strip().strip("'").strip('"')
+                break
+
+    if key:
+        try:
+            # Recrear cliente si no existe o si la clave cambió
+            gemini_client = genai.Client(api_key=key)
+            # Guardar en entorno para sincronizar otros módulos
+            os.environ["GEMINI_API_KEY"] = key
+            return gemini_client
+        except Exception as e:
+            logger.error(f"Error inicializando Google GenAI con API Key: {e}")
+            return None
+            
     return gemini_client
 
 
@@ -634,11 +651,22 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any]) -> Any:
 # =============================================================================
 # Invocación con Reintentos Progresivos y Fallback Dinámico
 # =============================================================================
-def _generate_with_fallback(contents: List[Any], config: types.GenerateContentConfig) -> Tuple[Any, str]:
+def _generate_with_fallback(
+    contents: List[Any],
+    config: types.GenerateContentConfig,
+    gemini_api_key: Optional[str] = None
+) -> Tuple[Any, str]:
     """
     Ejecuta la llamada a Gemini utilizando modelos descubiertos dinámicamente.
     Aplica reintentos progresivos (backoff) ante 503/429 y conmuta entre modelos activos.
     """
+    client = get_gemini_client(gemini_api_key)
+    if not client:
+        raise ValueError(
+            "La clave de API de Gemini (GEMINI_API_KEY) no está configurada en Render ni fue enviada desde el portal. "
+            "Por favor agrégala en el panel de Render (Environment > GEMINI_API_KEY) o ingrésala en el botón '🔌 Conexión' del portal."
+        )
+
     models_to_try = discover_active_models()
     last_error = None
 
@@ -647,9 +675,6 @@ def _generate_with_fallback(contents: List[Any], config: types.GenerateContentCo
         for attempt in range(3):
             try:
                 logger.info(f"Llamando a Gemini con modelo '{model_name}' (intento {attempt + 1})...")
-                client = get_gemini_client()
-                if not client:
-                    raise RuntimeError("GEMINI_API_KEY no configurada.")
                 response = client.models.generate_content(
                     model=model_name,
                     contents=contents,
@@ -675,10 +700,10 @@ def _generate_with_fallback(contents: List[Any], config: types.GenerateContentCo
                 else:
                     break
 
-    raise RuntimeError(f"Servicio temporalmente saturado en Google Cloud. Último error: {last_error}")
+    raise RuntimeError(f"Error de ejecución con Gemini: {last_error}")
 
 
-def _run_gemini_turn(input_contents: List[Any]) -> str:
+def _run_gemini_turn(input_contents: List[Any], gemini_api_key: Optional[str] = None) -> str:
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_INSTRUCTION,
         temperature=0.4,
@@ -688,7 +713,7 @@ def _run_gemini_turn(input_contents: List[Any]) -> str:
     current_contents = list(input_contents)
 
     for turn in range(4):
-        response, used_model = _generate_with_fallback(current_contents, config)
+        response, used_model = _generate_with_fallback(current_contents, config, gemini_api_key=gemini_api_key)
 
         function_calls = []
         if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
@@ -733,7 +758,8 @@ def _synthesize_voice(text: str) -> io.BytesIO:
 def procesar_instruccion_multimodal(
     audio_bytes: Optional[bytes] = None,
     mime_type: str = "audio/webm",
-    texto: Optional[str] = None
+    texto: Optional[str] = None,
+    gemini_api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Procesa notas de voz o instrucciones de texto provenientes del Portal Web o de Telegram.
@@ -759,7 +785,7 @@ def procesar_instruccion_multimodal(
         raise ValueError("Se requiere audio_bytes o texto para procesar la instrucción.")
 
     # Ejecutar ciclo de razonamiento con Gemini y Function Calling
-    texto_respuesta = _run_gemini_turn(contents)
+    texto_respuesta = _run_gemini_turn(contents, gemini_api_key=gemini_api_key)
 
     # Generar audio de respuesta con gTTS en base64 para reproducir en el navegador
     audio_base64 = None
