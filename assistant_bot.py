@@ -36,27 +36,206 @@ logging.basicConfig(
 )
 logger = logging.getLogger("VilcoVoiceAssistant")
 
-if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
-    logger.critical("Faltan variables de entorno TELEGRAM_BOT_TOKEN o GEMINI_API_KEY.")
-    sys.exit(1)
+# El chequeo estricto se delega a main() para permitir que el servidor HTTP
+# arranque de inmediato y Render apruebe el despliegue sin bootloops.
 
 # Importar submódulos de VilcoSystem
 import task_database
 import document_parser
 
 # =============================================================================
-# Servidor HTTP para Render Free Plan
+# Servidor Web & Portal Operativo para Render y Monitoreo Local
 # =============================================================================
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+class VilcoPortalServerHandler(BaseHTTPRequestHandler):
+    def _send_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._send_cors_headers()
         self.end_headers()
-        self.wfile.write("VilcoSystem Decisional Voice Assistant is running OK".encode("utf-8"))
 
     def do_HEAD(self):
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+
+    def do_GET(self):
+        path = self.path.split("?")[0]
+
+        # 1. Rutas de salud y raíz
+        if path in ("/", "/index.html"):
+            portal_path = os.path.join(os.path.dirname(__file__), "portal_tareas.html")
+            if os.path.exists(portal_path):
+                with open(portal_path, "rb") as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(content)))
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(content)
+                return
+            else:
+                msg = "VilcoSystem Portal Operativo Activo (Render Web Service)".encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(msg)
+                return
+
+        elif path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self._send_cors_headers()
+            self.end_headers()
+            resp = json.dumps({"status": "ok", "app": "VilcoVoiceAssistant", "portal": "enabled"})
+            self.wfile.write(resp.encode("utf-8"))
+            return
+
+        # 2. API de Tareas
+        elif path == "/api/tareas":
+            try:
+                tareas = task_database.obtener_todas_las_tareas()
+                payload = json.dumps({"status": "success", "tareas": tareas}, default=str)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(payload.encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
+            return
+
+        # 3. API de Métricas Dashboard
+        elif path == "/api/metricas":
+            try:
+                metrics = task_database.obtener_metricas_dashboard()
+                payload = json.dumps({"status": "success", "metricas": metrics}, default=str)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(payload.encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode("utf-8"))
+            return
+
+        # 4. Detalle de tarea por ID: /api/tareas/REQ-001
+        elif path.startswith("/api/tareas/"):
+            tarea_id = path.replace("/api/tareas/", "").strip()
+            tarea = task_database.obtener_tarea_por_id(tarea_id)
+            if tarea:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "success", "tarea": tarea}, default=str).encode("utf-8"))
+            else:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": f"Tarea {tarea_id} no encontrada"}).encode("utf-8"))
+            return
+
+        # 5. Exportar CSV
+        elif path == "/api/export/csv":
+            try:
+                tareas = task_database.obtener_todas_las_tareas()
+                output = io.StringIO()
+                output.write("\ufeff")
+                output.write("ID,Titulo,Solicitante,Cargo,Area,Prioridad,Criticidad,Estado,Avance,Fecha_Registro,Fecha_Limite\n")
+                for t in tareas:
+                    tit = t.get('titulo', '').replace('"', '""')
+                    sol = t.get('solicitante', '').replace('"', '""')
+                    output.write(f'{t.get("id")},"{tit}","{sol}",{t.get("cargo_solicitante")},{t.get("area")},{t.get("prioridad")},{t.get("criticidad")},{t.get("estado")},{t.get("porcentaje_avance", 0)},{t.get("created_at")},{t.get("fecha_limite")}\n')
+                csv_bytes = output.getvalue().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition", 'attachment; filename="reporte_tareas_vilcosystem.csv"')
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(csv_bytes)
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        try:
+            data = json.loads(body.decode("utf-8")) if body else {}
+        except Exception:
+            data = {}
+
+        if path == "/api/actualizar_avance":
+            tarea_id = data.get("tarea_id")
+            comentario = data.get("comentario", "")
+            nuevo_estado = data.get("nuevo_estado")
+            porcentaje = data.get("porcentaje")
+            query_sql = data.get("query_sql")
+            doc_ref = data.get("doc_referencia")
+
+            if not tarea_id or not comentario:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": "tarea_id y comentario son obligatorios"}).encode("utf-8"))
+                return
+
+            res = task_database.actualizar_avance(
+                tarea_id=tarea_id,
+                comentario=comentario,
+                nuevo_estado=nuevo_estado,
+                porcentaje=porcentaje,
+                query_sql=query_sql,
+                doc_referencia=doc_ref
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success", "tarea": res}, default=str).encode("utf-8"))
+            return
+
+        elif path == "/api/crear_solicitud":
+            res = task_database.crear_solicitud(
+                titulo=data.get("titulo", "Nueva Solicitud"),
+                solicitante=data.get("solicitante", "Cristian Villa"),
+                cargo_solicitante=data.get("cargo_solicitante", "SUBGERENTE"),
+                area=data.get("area", "OPERACIONES"),
+                descripcion=data.get("descripcion", ""),
+                prioridad=data.get("prioridad", "MEDIA"),
+                criticidad=data.get("criticidad", "MODERADA"),
+                justificacion_ia=data.get("justificacion_ia", "Registrado desde Portal Web"),
+                fecha_limite=data.get("fecha_limite")
+            )
+            self.send_response(201)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success", "tarea": res}, default=str).encode("utf-8"))
+            return
+
+        self.send_response(404)
         self.end_headers()
 
     def log_message(self, format, *args):
@@ -65,8 +244,8 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
 def start_health_server(port: int) -> None:
     try:
-        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        logger.info(f"Servidor HTTP de salud activo en puerto {port}.")
+        server = HTTPServer(("0.0.0.0", port), VilcoPortalServerHandler)
+        logger.info(f"Portal Web y Servidor HTTP de VilcoSystem activo en puerto {port}.")
         server.serve_forever()
     except Exception as e:
         logger.error(f"Error iniciando servidor HTTP en puerto {port}: {e}")
@@ -87,12 +266,19 @@ from google import genai
 from google.genai import types
 from gtts import gTTS
 
-try:
-    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-    logger.info("Cliente de Google GenAI inicializado con éxito.")
-except Exception as e:
-    logger.exception(f"Error inicializando Google GenAI: {e}")
-    sys.exit(1)
+gemini_client = None
+
+def get_gemini_client():
+    global gemini_client
+    if gemini_client is None:
+        key = os.getenv("GEMINI_API_KEY")
+        if key:
+            try:
+                gemini_client = genai.Client(api_key=key)
+                logger.info("Cliente de Google GenAI inicializado con éxito.")
+            except Exception as e:
+                logger.error(f"Error inicializando Google GenAI: {e}")
+    return gemini_client
 
 
 # =============================================================================
@@ -133,7 +319,10 @@ def discover_active_models() -> List[str]:
     try:
         logger.info("Descubriendo modelos activos en la cuenta de Google AI Studio...")
         available = []
-        for m in gemini_client.models.list():
+        client = get_gemini_client()
+        if not client:
+            return DEFAULT_FALLBACK_MODELS
+        for m in client.models.list():
             m_name = m.name.replace("models/", "")
             # Descartar modelos de embedding, imagen pura o experimentales no conversacionales
             if "gemini" in m_name and not any(x in m_name for x in ["embedding", "imagen", "veo", "lyria"]):
@@ -400,7 +589,10 @@ def _generate_with_fallback(contents: List[Any], config: types.GenerateContentCo
         for attempt in range(3):
             try:
                 logger.info(f"Llamando a Gemini con modelo '{model_name}' (intento {attempt + 1})...")
-                response = gemini_client.models.generate_content(
+                client = get_gemini_client()
+                if not client:
+                    raise RuntimeError("GEMINI_API_KEY no configurada.")
+                response = client.models.generate_content(
                     model=model_name,
                     contents=contents,
                     config=config
@@ -638,20 +830,37 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 def main() -> None:
-    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (v11 Auto-Discovery)...")
+    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (v11.0.2 Auto-Discovery)...")
+    # 1. Iniciar Servidor Web & Portal Operativo prioritariamente para Render
     http_thread = threading.Thread(target=start_health_server, args=(PORT,), daemon=True)
     http_thread.start()
 
-    # Descubrir modelos activos al inicio
+    # 2. Validación defensiva de credenciales para producción
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+
+    if not token or not gemini_key:
+        logger.warning(
+            "⚠️ ESPERANDO CONFIGURACIÓN: TELEGRAM_BOT_TOKEN o GEMINI_API_KEY aún no están definidas en Render. "
+            "El servidor web y portal se mantendrán activos en el puerto para satisfacer los health checks."
+        )
+        while not (os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("GEMINI_API_KEY")):
+            time.sleep(5)
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+        gemini_key = os.getenv("GEMINI_API_KEY")
+
+    # 3. Inicializar Google GenAI y descubrir modelos activos
+    get_gemini_client()
     discover_active_models()
 
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    # 4. Iniciar Bot de Telegram
+    app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    logger.info("Polling de Telegram iniciado...")
+    logger.info("Polling de Telegram iniciado. Escuchando eventos...")
     app.run_polling(drop_pending_updates=True)
 
 

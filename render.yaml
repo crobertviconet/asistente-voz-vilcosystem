@@ -1,20 +1,24 @@
 services:
   - type: web
     name: vilcosystem-voice-assistant
-    runtime: python
+    env: python
     region: oregon
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python assistant_bot.py
+    healthCheckPath: /health
+    autoDeploy: true
     envVars:
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: GEMINI_API_KEY
-        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: PORT
         value: "10000"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN

@@ -35,12 +35,15 @@ El bot resuelve de raíz los problemas de transcripción local (ffmpeg/STT offli
 
 ```
 AsistenteTareas/
-├── assistant_bot.py     # Lógica central del bot asíncrono
+├── assistant_bot.py     # Servidor HTTP web dual + Bot de Telegram asíncrono
+├── portal_tareas.html   # Portal Web Ejecutivo y Operativo (Dashboard y Bitácora)
+├── task_database.py     # Motor de base de datos híbrido (Turso Cloud + SQLite local)
+├── document_parser.py   # Indexador y extractor documental (Word, Excel, PDF, Scripts)
 ├── requirements.txt     # Dependencias de Python
-├── Procfile             # Definición de worker para Render / Heroku
+├── Procfile             # Definición de proceso web para Render / PaaS
 ├── render.yaml          # Blueprint de Infraestructura como Código (IaC) para Render
 ├── .env.example         # Plantilla de variables de entorno
-└── README.md            # Guía completa de despliegue y monitoreo
+└── README.md            # Documentación técnica completa y manual de uso
 ```
 
 ---
@@ -119,3 +122,41 @@ pip install -r requirements.txt
 python assistant_bot.py
 ```
 Abre tu bot en Telegram y envía una nota de voz.
+
+
+---
+
+## 7. Portal Web y Dashboard de Control en Tiempo Real
+
+El Asistente incorpora un **Portal Web Ejecutivo y Operativo** servido directamente en el puerto HTTP de Render (`PORT`, por defecto `10000`):
+
+- **Acceso en Producción:** `https://tu-servicio.onrender.com/`
+- **Acceso Local:** `http://localhost:10000/` o abriendo directamente `portal_tareas.html` en el navegador.
+
+### Características Principales del Portal:
+1. **Indicadores en un Golpe de Vista (KPI Cards):**
+   - **Total de Solicitudes:** Conteo consolidado de requerimientos históricos y activos.
+   - **Tareas Realizadas:** Conteo y tasa porcentual de cumplimiento sobre el total.
+   - **Tareas en Curso:** Conteo activo y promedio de avance porcentual ponderado.
+   - **Atención Urgente / Crítica:** Alertas visuales destacadas para tareas de impacto mayor (recaudación, cortes, balance energético).
+   - **Avance Global del Equipo:** Barra de progreso operacional consolidada.
+
+2. **Analítica Visual Interactiva (Chart.js):**
+   - **Distribución por Estado:** Gráfico dona interactivo (Completado, En Proceso, Pendiente, Revisión, Bloqueado).
+   - **Carga de Trabajo por Área:** Gráfico de barras por departamento (Operaciones, Facturación, TI, Finanzas, Gerencia).
+   - **Matriz de Prioridad y Criticidad:** Visualización de criticidad y urgencia.
+
+3. **Vistas Conmutables:**
+   - **Vista Tabla Ejecutiva:** Listado tabular con buscador en vivo, filtros por área, estado y prioridad, badges jerárquicos y barras de progreso.
+   - **Vista Cuadrícula de Tarjetas:** Formato visual tipo tablero para revisión rápida de estados.
+
+4. **Detalle Integral y Bitácora Técnica:**
+   - Modal con justificación decisional generada por la IA (impacto de negocio).
+   - Documentos técnicos adjuntos (Word, Excel, PDF, Scripts) con vista previa de resúmenes.
+   - Línea de tiempo cronológica con hitos, comentarios, porcentajes de avance y queries SQL ejecutadas (con botón para copiar código).
+
+5. **Operatividad Web y Exportación:**
+   - Registro y actualización de avances directamente desde la web (actualiza Turso/SQLite en tiempo real).
+   - Registro manual de nuevos requerimientos.
+   - Exportación de reportes en formato CSV compatible con Microsoft Excel (UTF-8 BOM).
+   - Formato optimizado para impresión o guardado en PDF (`Ctrl + P`).

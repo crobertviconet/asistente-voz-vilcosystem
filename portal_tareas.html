@@ -1,0 +1,2400 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VilcoSystem | Portal de Operaciones y Control de Tareas</title>
+    <!-- Chart.js para visualización de indicadores -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-main: #0B0F19;
+            --bg-card: #111827;
+            --bg-card-hover: #182235;
+            --bg-card-elevated: #1F293D;
+            --border-subtle: #26334D;
+            --border-highlight: #3B82F6;
+            --text-title: #F9FAFB;
+            --text-body: #E5E7EB;
+            --text-muted: #9CA3AF;
+            --primary: #06B6D4;
+            --primary-glow: rgba(6, 182, 212, 0.25);
+            --accent-blue: #3B82F6;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --danger: #EF4444;
+            --purple: #8B5CF6;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-body);
+            font-family: var(--font-family);
+            line-height: 1.5;
+            min-height: 100vh;
+            padding-bottom: 50px;
+        }
+
+        /* Top Header */
+        header {
+            background: linear-gradient(180deg, #111827 0%, rgba(17, 24, 39, 0.95) 100%);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 18px 28px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(8px);
+        }
+
+        .header-container {
+            max-width: 1440px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .brand-box {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-logo {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, #06B6D4 0%, #3B82F6 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 22px;
+            font-weight: 800;
+            box-shadow: 0 4px 14px var(--primary-glow);
+        }
+
+        .brand-text h1 {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-title);
+            letter-spacing: -0.3px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .brand-badge {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 6px;
+            background: rgba(6, 182, 212, 0.15);
+            color: var(--primary);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .brand-text p {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .system-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            border-radius: 20px;
+            font-size: 12px;
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--success);
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #06B6D4 0%, #0284C7 100%);
+            color: white;
+            box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
+        }
+
+        .btn-primary:hover {
+            opacity: 0.95;
+            transform: translateY(-1px);
+        }
+
+        .btn-outline {
+            background: var(--bg-card);
+            border-color: var(--border-subtle);
+            color: var(--text-body);
+        }
+
+        .btn-outline:hover {
+            background: var(--bg-card-elevated);
+            border-color: var(--text-muted);
+        }
+
+        /* Main Container */
+        .main-wrapper {
+            max-width: 1440px;
+            margin: 24px auto;
+            padding: 0 24px;
+        }
+
+        /* Section Title */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 16px;
+        }
+
+        .section-title {
+            font-size: 17px;
+            font-weight: 700;
+            color: var(--text-title);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* KPI Cards Grid */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .kpi-card:hover {
+            border-color: rgba(6, 182, 212, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+        }
+
+        .kpi-total::before { background: var(--primary); }
+        .kpi-completed::before { background: var(--success); }
+        .kpi-inprogress::before { background: var(--accent-blue); }
+        .kpi-critical::before { background: var(--danger); }
+        .kpi-rate::before { background: var(--purple); }
+
+        .kpi-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .kpi-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .kpi-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .kpi-value {
+            font-size: 32px;
+            font-weight: 800;
+            color: var(--text-title);
+            line-height: 1;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+        }
+
+        .kpi-subtext {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .kpi-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .badge-green { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+        .badge-blue { background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); }
+        .badge-red { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+        .badge-purple { background: rgba(139, 92, 246, 0.15); color: var(--purple); }
+
+        /* Progress Bar in KPI */
+        .kpi-progress-bar {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .kpi-progress-fill {
+            height: 100%;
+            border-radius: 3px;
+            background: linear-gradient(90deg, #10B981, #06B6D4);
+            transition: width 0.8s ease;
+        }
+
+        /* Charts Container */
+        .charts-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 1024px) {
+            .charts-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .chart-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 18px;
+            position: relative;
+        }
+
+        .chart-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-title);
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .chart-container-inner {
+            position: relative;
+            height: 200px;
+            width: 100%;
+        }
+
+        /* Filter Tabs */
+        .tabs-bar {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 12px;
+            margin-bottom: 16px;
+            overflow-x: auto;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-muted);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-title);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .tab-btn.active {
+            background: rgba(6, 182, 212, 0.12);
+            color: var(--primary);
+            border-color: rgba(6, 182, 212, 0.3);
+        }
+
+        .tab-count {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 1px 7px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .tab-btn.active .tab-count {
+            background: var(--primary);
+            color: #0B0F19;
+        }
+
+        /* Search and Filter Toolbar */
+        .toolbar {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 14px 18px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .search-box {
+            position: relative;
+            flex: 1;
+            min-width: 260px;
+        }
+
+        .search-input {
+            width: 100%;
+            background: var(--bg-main);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 9px 14px 9px 36px;
+            color: var(--text-title);
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .select-filter {
+            background: var(--bg-main);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: var(--text-body);
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .select-filter:focus {
+            border-color: var(--primary);
+        }
+
+        .view-toggle {
+            display: flex;
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .view-btn {
+            background: var(--bg-main);
+            border: none;
+            padding: 8px 12px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .view-btn.active {
+            background: var(--bg-card-elevated);
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        /* Table Design */
+        .table-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        th {
+            background: rgba(17, 24, 39, 0.9);
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 11px;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-subtle);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-subtle);
+            vertical-align: middle;
+            color: var(--text-body);
+        }
+
+        tr:hover td {
+            background: var(--bg-card-hover);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Badges & Tags */
+        .badge-id {
+            font-family: monospace;
+            font-weight: 700;
+            background: rgba(59, 130, 246, 0.12);
+            color: #60A5FA;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .task-title-cell {
+            max-width: 320px;
+        }
+
+        .task-title {
+            font-weight: 700;
+            color: var(--text-title);
+            margin-bottom: 3px;
+            font-size: 14px;
+        }
+
+        .task-desc-snip {
+            font-size: 12px;
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 300px;
+        }
+
+        .badge-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+
+        .status-completado {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34D399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status-en_proceso {
+            background: rgba(6, 182, 212, 0.15);
+            color: #38BDF8;
+            border: 1px solid rgba(6, 182, 212, 0.3);
+        }
+
+        .status-revision {
+            background: rgba(139, 92, 246, 0.15);
+            color: #C084FC;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        .status-pendiente {
+            background: rgba(245, 158, 11, 0.15);
+            color: #FBBF24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .status-bloqueado {
+            background: rgba(239, 68, 68, 0.15);
+            color: #F87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .badge-priority {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 6px;
+            display: inline-block;
+            white-space: nowrap;
+        }
+
+        .prio-urgente { background: rgba(239, 68, 68, 0.2); color: #F87171; border: 1px solid #EF4444; }
+        .prio-alta { background: rgba(249, 115, 22, 0.2); color: #FB923C; }
+        .prio-media { background: rgba(59, 130, 246, 0.15); color: #60A5FA; }
+        .prio-baja { background: rgba(156, 163, 175, 0.15); color: #9CA3AF; }
+
+        .area-tag {
+            font-size: 11px;
+            font-weight: 600;
+            color: #D1D5DB;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 6px;
+            white-space: nowrap;
+        }
+
+        /* Progress Bar Cell */
+        .progress-box {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 120px;
+        }
+
+        .progress-track {
+            flex: 1;
+            height: 7px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar-inner {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.4s ease;
+        }
+
+        .progress-percent {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-title);
+            min-width: 32px;
+            text-align: right;
+        }
+
+        /* Hierarchy Badge */
+        .hierarchy-pill {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Action Buttons */
+        .actions-cell {
+            white-space: nowrap;
+            display: flex;
+            gap: 6px;
+        }
+
+        .btn-action-view {
+            padding: 6px 10px;
+            font-size: 12px;
+            background: rgba(6, 182, 212, 0.1);
+            color: var(--primary);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn-action-view:hover {
+            background: var(--primary);
+            color: #0B0F19;
+        }
+
+        .btn-action-update {
+            padding: 6px 10px;
+            font-size: 12px;
+            background: rgba(59, 130, 246, 0.1);
+            color: #60A5FA;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn-action-update:hover {
+            background: #3B82F6;
+            color: #fff;
+        }
+
+        /* Cards View (Grid Mode) */
+        .cards-grid {
+            display: none;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 16px;
+        }
+
+        .task-card-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .task-card-item:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .card-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-title);
+            margin-bottom: 8px;
+            line-height: 1.3;
+        }
+
+        .card-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .card-footer {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(5px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            width: 100%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            background: var(--bg-card);
+            z-index: 10;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-title);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 22px;
+            cursor: pointer;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-title);
+        }
+
+        .modal-body {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 14px;
+            background: var(--bg-main);
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .info-item .item-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 2px;
+        }
+
+        .info-item .item-value {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-title);
+        }
+
+        .ai-justification-box {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .ai-justification-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .timeline-container {
+            margin-top: 10px;
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-left: 24px;
+            padding-bottom: 20px;
+            border-left: 2px solid var(--border-subtle);
+        }
+
+        .timeline-item:last-child {
+            border-left-color: transparent;
+            padding-bottom: 0;
+        }
+
+        .timeline-dot {
+            position: absolute;
+            left: -7px;
+            top: 0;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--primary);
+            box-shadow: 0 0 8px var(--primary);
+        }
+
+        .timeline-date {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        .timeline-text {
+            font-size: 13px;
+            color: var(--text-body);
+            background: var(--bg-main);
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .sql-snippet {
+            margin-top: 8px;
+            background: #0D1117;
+            border: 1px solid #30363D;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #7EE787;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .copy-sql-btn {
+            position: absolute;
+            right: 8px;
+            top: 8px;
+            font-size: 10px;
+            padding: 2px 6px;
+            background: #21262D;
+            border: 1px solid #30363D;
+            color: #C9D1D9;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* Form Inputs in Modal */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-title);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-control {
+            width: 100%;
+            background: var(--bg-main);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text-title);
+            font-size: 13px;
+            outline: none;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+        }
+
+        textarea.form-control {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .range-slider-box {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .range-slider {
+            flex: 1;
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        .range-value {
+            font-size: 16px;
+            font-weight: 800;
+            color: var(--primary);
+            min-width: 45px;
+            text-align: right;
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            background: var(--bg-card);
+            position: sticky;
+            bottom: 0;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 48px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            opacity: 0.6;
+        }
+
+        /* Responsive tweaks */
+        @media (max-width: 768px) {
+            .header-container {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .header-actions {
+                width: 100%;
+                justify-content: space-between;
+            }
+            .toolbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .filter-group {
+                justify-content: space-between;
+            }
+            .kpi-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media print {
+            header, .toolbar, .tabs-bar, .actions-cell, .header-actions, .btn {
+                display: none !important;
+            }
+            body {
+                background: white;
+                color: black;
+            }
+            .table-card {
+                border: 1px solid #ccc;
+                box-shadow: none;
+            }
+            th, td {
+                color: black;
+                border-color: #ddd;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header Principal -->
+    <header>
+        <div class="header-container">
+            <div class="brand-box">
+                <div class="brand-logo">⚡</div>
+                <div class="brand-text">
+                    <h1>VilcoSystem <span class="brand-badge">Control Hub</span></h1>
+                    <p>Monitoreo Decisional de Tareas, Bitácora y Operaciones</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <div class="system-status">
+                    <span class="status-dot"></span>
+                    <span id="status-label">En Línea • Turso / Render</span>
+                </div>
+                <button class="btn btn-outline" onclick="exportToCSV()" title="Exportar reporte en CSV">
+                    📥 Exportar CSV
+                </button>
+                <button class="btn btn-outline" onclick="window.print()" title="Imprimir o guardar como PDF">
+                    🖨️ Imprimir
+                </button>
+                <button class="btn btn-primary" onclick="openNewTaskModal()">
+                    ➕ Nueva Solicitud
+                </button>
+                <button class="btn btn-outline" onclick="loadDashboardData()" title="Recargar datos">
+                    🔄
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-wrapper">
+
+        <!-- KPI Cards Grid (En un golpe de vista) -->
+        <div class="section-header">
+            <div class="section-title">
+                📊 Indicadores de Gestión y Estado Operativo
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted);" id="last-updated-text">
+                Actualizado en tiempo real
+            </div>
+        </div>
+
+        <div class="kpi-grid">
+            <!-- 1. Total Requerimientos -->
+            <div class="kpi-card kpi-total">
+                <div class="kpi-header">
+                    <span class="kpi-label">Total Solicitudes</span>
+                    <span class="kpi-icon">📋</span>
+                </div>
+                <div class="kpi-value" id="kpi-total-val">0</div>
+                <div class="kpi-subtext">
+                    <span id="kpi-total-sub">0 activas • 0 finalizadas</span>
+                </div>
+            </div>
+
+            <!-- 2. Tareas Realizadas (Completadas) -->
+            <div class="kpi-card kpi-completed">
+                <div class="kpi-header">
+                    <span class="kpi-label">Tareas Realizadas</span>
+                    <span class="kpi-icon">✅</span>
+                </div>
+                <div class="kpi-value" id="kpi-completed-val">0</div>
+                <div class="kpi-subtext">
+                    <span class="kpi-badge badge-green" id="kpi-completed-rate">0% Cumplimiento</span>
+                    <span>sobre el total</span>
+                </div>
+            </div>
+
+            <!-- 3. Tareas en Curso -->
+            <div class="kpi-card kpi-inprogress">
+                <div class="kpi-header">
+                    <span class="kpi-label">Tareas en Curso</span>
+                    <span class="kpi-icon">⚡</span>
+                </div>
+                <div class="kpi-value" id="kpi-inprogress-val">0</div>
+                <div class="kpi-subtext">
+                    <span class="kpi-badge badge-blue" id="kpi-active-avg">Avance: 0%</span>
+                    <span>promedio activas</span>
+                </div>
+            </div>
+
+            <!-- 4. Críticas / Urgentes -->
+            <div class="kpi-card kpi-critical">
+                <div class="kpi-header">
+                    <span class="kpi-label">Atención Urgente</span>
+                    <span class="kpi-icon">🔥</span>
+                </div>
+                <div class="kpi-value" id="kpi-critical-val">0</div>
+                <div class="kpi-subtext">
+                    <span class="kpi-badge badge-red">Prioridad Máxima</span>
+                    <span>activas sin resolver</span>
+                </div>
+            </div>
+
+            <!-- 5. Tasa de Avance Global -->
+            <div class="kpi-card kpi-rate">
+                <div class="kpi-header">
+                    <span class="kpi-label">Avance Operativo</span>
+                    <span class="kpi-icon">📈</span>
+                </div>
+                <div class="kpi-value">
+                    <span id="kpi-global-avg">0</span><span style="font-size: 18px; color: var(--text-muted);">%</span>
+                </div>
+                <div class="kpi-progress-bar">
+                    <div class="kpi-progress-fill" id="kpi-global-progress" style="width: 0%;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="charts-row">
+            <!-- Gráfico 1: Estado -->
+            <div class="chart-box">
+                <div class="chart-title">
+                    <span>Distribución por Estado</span>
+                    <span style="font-size: 11px; color: var(--text-muted);">Realizadas vs En Curso</span>
+                </div>
+                <div class="chart-container-inner">
+                    <canvas id="chartStatus"></canvas>
+                </div>
+            </div>
+
+            <!-- Gráfico 2: Áreas -->
+            <div class="chart-box">
+                <div class="chart-title">
+                    <span>Carga de Trabajo por Área</span>
+                    <span style="font-size: 11px; color: var(--text-muted);">Demanda Institucional</span>
+                </div>
+                <div class="chart-container-inner">
+                    <canvas id="chartArea"></canvas>
+                </div>
+            </div>
+
+            <!-- Gráfico 3: Prioridades -->
+            <div class="chart-box">
+                <div class="chart-title">
+                    <span>Distribución por Prioridad</span>
+                    <span style="font-size: 11px; color: var(--text-muted);">Nivel de Exigencia</span>
+                </div>
+                <div class="chart-container-inner">
+                    <canvas id="chartPriority"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter Tabs -->
+        <div class="tabs-bar">
+            <button class="tab-btn active" onclick="setQuickTab('all', this)">
+                📋 Todas las Tareas <span class="tab-count" id="tab-count-all">0</span>
+            </button>
+            <button class="tab-btn" onclick="setQuickTab('en_curso', this)">
+                ⚡ En Curso (Activas) <span class="tab-count" id="tab-count-en_curso">0</span>
+            </button>
+            <button class="tab-btn" onclick="setQuickTab('completado', this)">
+                ✅ Realizadas <span class="tab-count" id="tab-count-completado">0</span>
+            </button>
+            <button class="tab-btn" onclick="setQuickTab('criticas', this)">
+                🔥 Críticas / Urgentes <span class="tab-count" id="tab-count-criticas">0</span>
+            </button>
+            <button class="tab-btn" onclick="setQuickTab('bloqueado', this)">
+                🛑 Bloqueadas / Revisión <span class="tab-count" id="tab-count-bloqueado">0</span>
+            </button>
+        </div>
+
+        <!-- Search and Filter Toolbar -->
+        <div class="toolbar">
+            <div class="search-box">
+                <span class="search-icon">🔍</span>
+                <input type="text" class="search-input" id="search-input" placeholder="Buscar por título, código REQ, solicitante, descripción o query SQL..." oninput="applyFilters()">
+            </div>
+            <div class="filter-group">
+                <select class="select-filter" id="filter-area" onchange="applyFilters()">
+                    <option value="">Todas las Áreas</option>
+                    <option value="OPERACIONES">Operaciones</option>
+                    <option value="FACTURACION">Facturación</option>
+                    <option value="TI">TI / Sistemas</option>
+                    <option value="FINANZAS">Finanzas</option>
+                    <option value="GERENCIA">Gerencia</option>
+                </select>
+
+                <select class="select-filter" id="filter-estado" onchange="applyFilters()">
+                    <option value="">Todos los Estados</option>
+                    <option value="EN_PROCESO">En Proceso</option>
+                    <option value="PENDIENTE">Pendiente</option>
+                    <option value="REVISION">En Revisión</option>
+                    <option value="BLOQUEADO">Bloqueado</option>
+                    <option value="COMPLETADO">Completado</option>
+                </select>
+
+                <select class="select-filter" id="filter-prioridad" onchange="applyFilters()">
+                    <option value="">Cualquier Prioridad</option>
+                    <option value="URGENTE">Urgente</option>
+                    <option value="ALTA">Alta</option>
+                    <option value="MEDIA">Media</option>
+                    <option value="BAJA">Baja</option>
+                </select>
+
+                <div class="view-toggle">
+                    <button class="view-btn active" id="btn-view-table" onclick="setViewMode('table')">Tabla</button>
+                    <button class="view-btn" id="btn-view-cards" onclick="setViewMode('cards')">Tarjetas</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabla Ejecutiva de Tareas -->
+        <div class="table-card" id="view-table-wrapper">
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Tarea & Requerimiento</th>
+                            <th>Solicitante</th>
+                            <th>Área</th>
+                            <th>Prioridad / Criticidad</th>
+                            <th>Avance</th>
+                            <th>Estado</th>
+                            <th>Documentos</th>
+                            <th style="text-align: right;">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tasks-table-body">
+                        <!-- Generado dinámicamente -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Cuadrícula de Tarjetas (Cards View) -->
+        <div class="cards-grid" id="view-cards-wrapper">
+            <!-- Generado dinámicamente -->
+        </div>
+
+        <!-- Estado Vacío -->
+        <div class="empty-state" id="empty-state" style="display: none;">
+            <div class="empty-state-icon">📂</div>
+            <h3>No se encontraron tareas</h3>
+            <p>Intenta ajustar los filtros de búsqueda o registra un nuevo requerimiento.</p>
+        </div>
+
+    </div>
+
+    <!-- Modal 1: Detalle Completo de Tarea & Bitácora -->
+    <div class="modal-overlay" id="modal-detail">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <span class="badge-id" id="detail-code">REQ-000</span>
+                    <span id="detail-title">Título de la Tarea</span>
+                </div>
+                <button class="btn-close" onclick="closeModal('modal-detail')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Info Grid -->
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="item-label">Solicitante</div>
+                        <div class="item-value" id="detail-solicitante">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="item-label">Área / Cargo</div>
+                        <div class="item-value" id="detail-area-cargo">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="item-label">Estado & Avance</div>
+                        <div class="item-value" id="detail-status-avance">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="item-label">Prioridad / Criticidad</div>
+                        <div class="item-value" id="detail-priority-crit">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="item-label">Fecha de Registro</div>
+                        <div class="item-value" id="detail-created">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="item-label">Fecha Límite</div>
+                        <div class="item-value" id="detail-deadline">-</div>
+                    </div>
+                </div>
+
+                <!-- Descripción -->
+                <div>
+                    <h4 style="font-size: 13px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">Descripción del Requerimiento</h4>
+                    <p style="font-size: 14px; background: var(--bg-main); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border-subtle);" id="detail-description"></p>
+                </div>
+
+                <!-- Justificación IA -->
+                <div class="ai-justification-box">
+                    <div class="ai-justification-title">
+                        <span>🤖 Análisis y Justificación Decisional (Gemini)</span>
+                    </div>
+                    <p style="font-size: 13px; color: var(--text-body);" id="detail-ai-justification"></p>
+                </div>
+
+                <!-- Documentos Asociados -->
+                <div id="detail-docs-section">
+                    <h4 style="font-size: 13px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px;">Documentos Técnicos Adjuntos (<span id="detail-docs-count">0</span>)</h4>
+                    <div id="detail-docs-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                </div>
+
+                <!-- Bitácora de Avances -->
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h4 style="font-size: 13px; color: var(--text-muted); text-transform: uppercase;">Línea de Tiempo y Bitácora Técnica</h4>
+                        <button class="btn btn-outline" style="padding: 4px 10px; font-size: 12px;" onclick="openQuickUpdateFromDetail()">
+                            ➕ Registrar Avance
+                        </button>
+                    </div>
+                    <div class="timeline-container" id="detail-timeline"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('modal-detail')">Cerrar</button>
+                <button class="btn btn-primary" onclick="openQuickUpdateFromDetail()">Actualizar Avance</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 2: Registrar / Actualizar Avance -->
+    <div class="modal-overlay" id="modal-update">
+        <div class="modal-box" style="max-width: 600px;">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <span>✍️ Registrar Avance</span>
+                    <span class="badge-id" id="update-modal-task-id">REQ-000</span>
+                </div>
+                <button class="btn-close" onclick="closeModal('modal-update')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="update-modal-task-title" style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px;"></p>
+
+                <div class="form-group">
+                    <label class="form-label">Estado de la Tarea</label>
+                    <select class="form-control" id="update-estado">
+                        <option value="EN_PROCESO">⚡ EN PROCESO</option>
+                        <option value="COMPLETADO">✅ COMPLETADO</option>
+                        <option value="REVISION">🔍 EN REVISIÓN</option>
+                        <option value="BLOQUEADO">🛑 BLOQUEADO</option>
+                        <option value="PENDIENTE">⏳ PENDIENTE</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Porcentaje de Avance</label>
+                    <div class="range-slider-box">
+                        <input type="range" min="0" max="100" step="5" class="range-slider" id="update-percent" oninput="document.getElementById('update-percent-val').innerText = this.value + '%'">
+                        <span class="range-value" id="update-percent-val">50%</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Comentario o Bitácora del Hito (*)</label>
+                    <textarea class="form-control" id="update-comment" placeholder="Describe qué se avanzó, qué pruebas se realizaron o qué hito se alcanzó..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Query SQL o Comando Técnico (Opcional)</label>
+                    <textarea class="form-control" id="update-sql" style="font-family: monospace; font-size: 12px;" placeholder="SELECT * FROM ...; UPDATE ...; ALTER TABLE ...;"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Documento o Enlace de Referencia (Opcional)</label>
+                    <input type="text" class="form-control" id="update-doc-ref" placeholder="Ej. acta_entrega_mej16.pdf o enlace a informe">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('modal-update')">Cancelar</button>
+                <button class="btn btn-primary" onclick="submitTaskUpdate()">Guardar Avance</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 3: Nueva Solicitud Manual -->
+    <div class="modal-overlay" id="modal-new-task">
+        <div class="modal-box" style="max-width: 650px;">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <span>➕ Registrar Nueva Solicitud</span>
+                </div>
+                <button class="btn-close" onclick="closeModal('modal-new-task')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Título del Requerimiento (*)</label>
+                    <input type="text" class="form-control" id="new-titulo" placeholder="Ej. Actualización de factor de pérdidas del transformador central">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                    <div class="form-group">
+                        <label class="form-label">Solicitante (*)</label>
+                        <input type="text" class="form-control" id="new-solicitante" placeholder="Ej. Valerio, Ing. Carlos Mendoza">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Cargo</label>
+                        <select class="form-control" id="new-cargo">
+                            <option value="SUBGERENTE">Subgerente</option>
+                            <option value="GERENTE_GENERAL">Gerente General</option>
+                            <option value="JEFE_AREA">Jefe de Área</option>
+                            <option value="OPERATIVO">Operativo</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+                    <div class="form-group">
+                        <label class="form-label">Área</label>
+                        <select class="form-control" id="new-area">
+                            <option value="OPERACIONES">Operaciones</option>
+                            <option value="FACTURACION">Facturación</option>
+                            <option value="TI">TI / Sistemas</option>
+                            <option value="FINANZAS">Finanzas</option>
+                            <option value="GERENCIA">Gerencia</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Prioridad</label>
+                        <select class="form-control" id="new-prioridad">
+                            <option value="ALTA">Alta</option>
+                            <option value="URGENTE">Urgente</option>
+                            <option value="MEDIA" selected>Media</option>
+                            <option value="BAJA">Baja</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Criticidad</label>
+                        <select class="form-control" id="new-criticidad">
+                            <option value="ALTA">Alta</option>
+                            <option value="CRITICA">Crítica</option>
+                            <option value="MODERADA" selected>Moderada</option>
+                            <option value="LEVE">Leve</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Descripción Detallada (*)</label>
+                    <textarea class="form-control" id="new-descripcion" placeholder="Indica el requerimiento completo, impacto y resultados esperados..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Fecha Límite (Opcional)</label>
+                    <input type="date" class="form-control" id="new-fecha-limite">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('modal-new-task')">Cancelar</button>
+                <button class="btn btn-primary" onclick="submitNewTask()">Crear Solicitud</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script de Inicialización y Lógica Dinámica -->
+    <script>
+        // Estado Global
+        let allTasks = [];
+        let dashboardMetrics = {};
+        let activeTab = 'all';
+        let currentView = 'table';
+        let selectedTaskForUpdate = null;
+
+        // Referencias a Gráficos
+        let chartStatusInstance = null;
+        let chartAreaInstance = null;
+        let chartPriorityInstance = null;
+
+        // Dataset de respaldo offline/demo
+        const FALLBACK_DATA = [
+            {
+                id: "REQ-001",
+                titulo: "Implementación de Ciclos de Lectura Independientes en ElectriApp (MEJ-16)",
+                solicitante: "Valerio",
+                cargo_solicitante: "SUBGERENTE",
+                area: "OPERACIONES",
+                descripcion: "Desvincular la apertura de rondas de lectura mensual respecto a la recepción de la factura oficial de Electrodunas, permitiendo a los lectores ingresar consumos desde el cierre de ciclo.",
+                prioridad: "ALTA",
+                criticidad: "ALTA",
+                justificacion_ia: "Evita cuellos de botella en la cobranza vecinal. Los lectores pueden registrar consumos a tiempo sin depender de la emisión de la empresa concesionaria.",
+                estado: "COMPLETADO",
+                porcentaje_avance: 100,
+                fecha_limite: "2026-09-25",
+                created_at: "2026-09-15 08:30:00",
+                completed_at: "2026-09-24 17:45:00",
+                total_documentos: 1,
+                total_bitacora: 3,
+                documentos: [
+                    { nombre_archivo: "acta_entrega_mej16.pdf", tipo_archivo: "PDF", tamano_bytes: 45210, resumen: "Acta de conformidad de pruebas de lectura independiente" }
+                ],
+                bitacora: [
+                    { created_at: "2026-09-16 10:15:00", comentario: "Diseño de la nueva estructura de períodos y estados de lectura sin dependencia de factura matriz.", porcentaje: 30, query_sql: "ALTER TABLE periodos_lectura ADD COLUMN factura_electrodunas_recibida INTEGER DEFAULT 0;" },
+                    { created_at: "2026-09-20 16:00:00", comentario: "Adaptación de vistas para lectores de campo y validación de rangos de consumo.", porcentaje: 70 },
+                    { created_at: "2026-09-24 17:45:00", comentario: "Despliegue a producción y pruebas de cierre de ciclo validadas exitosamente.", porcentaje: 100, doc_referencia: "acta_entrega_mej16.pdf" }
+                ]
+            },
+            {
+                id: "REQ-002",
+                titulo: "Cálculo y Automatización de Fechas Defensivas de Vencimiento (MEJ-15)",
+                solicitante: "Valerio",
+                cargo_solicitante: "SUBGERENTE",
+                area: "OPERACIONES",
+                descripcion: "Configurar el vencimiento de recibos familiares exactamente 5 días antes de la fecha límite de la factura matriz comunitaria de Electrodunas.",
+                prioridad: "ALTA",
+                criticidad: "CRITICA",
+                justificacion_ia: "Crítico para evitar cortes de suministro general por falta de liquidez colectiva en tesorería antes de la fecha de corte de Electrodunas.",
+                estado: "COMPLETADO",
+                porcentaje_avance: 100,
+                fecha_limite: "2026-09-28",
+                created_at: "2026-09-18 09:00:00",
+                completed_at: "2026-09-27 15:20:00",
+                total_documentos: 0,
+                total_bitacora: 2,
+                documentos: [],
+                bitacora: [
+                    { created_at: "2026-09-22 11:30:00", comentario: "Implementada función defensiva de cálculo de fecha de vencimiento (-5 días calendario de la matriz).", porcentaje: 60, query_sql: "UPDATE recibos_familia SET fecha_vencimiento = date(fecha_vencimiento_matriz, '-5 days');" },
+                    { created_at: "2026-09-27 15:20:00", comentario: "Regla validada en generación masiva de recibos y notificaciones WhatsApp a delegados de sector.", porcentaje: 100 }
+                ]
+            },
+            {
+                id: "REQ-003",
+                titulo: "Corrección de Imputación FIFO en Pagos sin Recibo Explícito (BUG-14)",
+                solicitante: "Ing. Carlos Mendoza",
+                cargo_solicitante: "JEFE_AREA",
+                area: "FACTURACION",
+                descripcion: "Garantizar que pagos parciales o pagos en ventanilla sin especificar ID de recibo amorticen obligatoriamente los recibos impagos más antiguos de la familia.",
+                prioridad: "URGENTE",
+                criticidad: "CRITICA",
+                justificacion_ia: "Evita que queden deudas antiguas devengando moras o intereses mientras recibos recientes aparecen pagados.",
+                estado: "COMPLETADO",
+                porcentaje_avance: 100,
+                fecha_limite: "2026-09-30",
+                created_at: "2026-09-26 14:10:00",
+                completed_at: "2026-09-30 18:00:00",
+                total_documentos: 0,
+                total_bitacora: 2,
+                documentos: [],
+                bitacora: [
+                    { created_at: "2026-09-28 12:00:00", comentario: "Detectada inconsistencia en amortización arbitraria; refactorizado algoritmo de imputación por fecha de emisión ascendente.", porcentaje: 50, query_sql: "SELECT id, saldo_pendiente FROM recibos WHERE familia_id = ? AND estado = 'PENDIENTE' ORDER BY fecha_emision ASC;" },
+                    { created_at: "2026-09-30 18:00:00", comentario: "Pruebas de conciliación bancaria y ventanilla aprobadas con 45 casos de prueba.", porcentaje: 100 }
+                ]
+            },
+            {
+                id: "REQ-004",
+                titulo: "Actualización Diaria Tasa TAMN SBS y Liquidación de Intereses (Octubre 2026)",
+                solicitante: "Valerio",
+                cargo_solicitante: "SUBGERENTE",
+                area: "FINANZAS",
+                descripcion: "Actualizar la tabla de tasas de interés moratorio activa de moneda nacional publicada por la SBS al inicio de Octubre 2026 y validar el recálculo diario.",
+                prioridad: "URGENTE",
+                criticidad: "CRITICA",
+                justificacion_ia: "Impacto directo en la liquidación financiera y cumplimiento con las normativas de Osinergmin y SBS para cobranza de recibos devengados.",
+                estado: "EN_PROCESO",
+                porcentaje_avance: 75,
+                fecha_limite: "2026-10-03",
+                created_at: "2026-10-01 07:45:00",
+                total_documentos: 0,
+                total_bitacora: 2,
+                documentos: [],
+                bitacora: [
+                    { created_at: "2026-10-01 16:38:00", comentario: "Extracción de tasas SBS al 01/10/2026 recibida y cotejada con correo formal a Electrodunas.", porcentaje: 50, query_sql: "INSERT INTO tasas_interes_sbs (fecha, tamn_anual, factor_diario) VALUES ('2026-10-01', 0.1425, 0.000366);" },
+                    { created_at: "2026-10-02 10:15:00", comentario: "Módulo de cálculo de intereses moratorios ejecutado en lote de prueba. En espera de visto bueno contable.", porcentaje: 75 }
+                ]
+            },
+            {
+                id: "REQ-005",
+                titulo: "Migración de Persistencia a Turso Cloud libSQL y Wrapper de Cursores",
+                solicitante: "Cristian Villa",
+                cargo_solicitante: "LIDER_TECNICO",
+                area: "TI",
+                descripcion: "Resolver la pérdida de datos por efimeridad de contenedores en Render conectando el Asistente a Turso libSQL con LibSQLConnectionWrapper y LibSQLRow.",
+                prioridad: "ALTA",
+                criticidad: "CRITICA",
+                justificacion_ia: "Vital para la persistencia del Asistente en la nube. Sin esto, cada reinicio de Render reinicia la base de datos a cero.",
+                estado: "EN_PROCESO",
+                porcentaje_avance: 85,
+                fecha_limite: "2026-10-04",
+                created_at: "2026-10-01 12:00:00",
+                total_documentos: 0,
+                total_bitacora: 3,
+                documentos: [],
+                bitacora: [
+                    { created_at: "2026-10-01 19:50:00", comentario: "Identificado error de tuplas crudas en driver libsql de Python; creadas clases envoltorias LibSQLRow y LibSQLCursorWrapper.", porcentaje: 40 },
+                    { created_at: "2026-10-02 06:10:00", comentario: "Verificada compatibilidad híbrida SQLite local y Turso Cloud con fallbacks automáticos.", porcentaje: 70 },
+                    { created_at: "2026-10-02 13:00:00", comentario: "Integrando servidor web para portal interactivo de control y health check en puerto Render.", porcentaje: 85 }
+                ]
+            },
+            {
+                id: "REQ-006",
+                titulo: "Auditoría de Balance Energético y Control de Pérdidas de Transformador",
+                solicitante: "Ing. Roberto Sánchez",
+                cargo_solicitante: "JEFE_AREA",
+                area: "OPERACIONES",
+                descripcion: "Comparar la energía activa total registrada en el medidor matriz vs la sumatoria de medidores secundarios de los 120 lotes del Sector A.",
+                prioridad: "MEDIA",
+                criticidad: "ALTA",
+                justificacion_ia: "Permite detectar conexiones clandestinas, fugas a tierra o medidores descalibrados antes del cierre de facturación.",
+                estado: "EN_PROCESO",
+                porcentaje_avance: 40,
+                fecha_limite: "2026-10-06",
+                created_at: "2026-10-01 15:20:00",
+                total_documentos: 0,
+                total_bitacora: 1,
+                documentos: [],
+                bitacora: [
+                    { created_at: "2026-10-02 11:00:00", comentario: "Consolidado preliminar de 98 de 120 lotes con 3.8% de delta estimado dentro del margen admisible.", porcentaje: 40, query_sql: "SELECT SUM(consumo_kwh) as consumo_total FROM lecturas_sector_a WHERE ciclo_id = '2026-09';" }
+                ]
+            },
+            {
+                id: "REQ-007",
+                titulo: "Validación Estricta de Sobrepagos y Bloqueo de Pagos Superfluos (BUG-17)",
+                solicitante: "Ing. Carlos Mendoza",
+                cargo_solicitante: "JEFE_AREA",
+                area: "FACTURACION",
+                descripcion: "Rechazar en backend con HTTP 400 cualquier intento de registrar un pago o voucher cuyo monto supere la deuda total de la familia.",
+                prioridad: "ALTA",
+                criticidad: "ALTA",
+                justificacion_ia: "Evita saldos a favor descontrolados en contabilidad y discrepancias con comprobantes fiscales.",
+                estado: "REVISION",
+                porcentaje_avance: 90,
+                fecha_limite: "2026-10-03",
+                created_at: "2026-09-29 11:00:00",
+                total_documentos: 0,
+                total_bitacora: 2,
+                documentos: [],
+                bitacora: [
+                    { created_at: "2026-09-30 16:30:00", comentario: "Desarrollada verificación previa de saldo insoluto antes de asentar transacción en ventanilla.", porcentaje: 60 },
+                    { created_at: "2026-10-02 09:40:00", comentario: "Subida a ambiente de pruebas; delegados verificando rechazo de pagos excedentes.", porcentaje: 90 }
+                ]
+            },
+            {
+                id: "REQ-008",
+                titulo: "Generador de Recibos Digitales en PDF con QR y Desglose de Pérdidas",
+                solicitante: "Lic. Patricia Quispe",
+                cargo_solicitante: "JEFE_AREA",
+                area: "GERENCIA",
+                descripcion: "Diseñar el formato oficial de recibo digital para descarga directa de las familias, con desglose de cargo fijo, alumbrado, pérdidas compartidas y QR de validación.",
+                prioridad: "BAJA",
+                criticidad: "MODERADA",
+                justificacion_ia: "Mejora la transparencia frente a las familias asociadas y agiliza la auditoría comunitaria.",
+                estado: "PENDIENTE",
+                porcentaje_avance: 15,
+                fecha_limite: "2026-10-10",
+                created_at: "2026-10-02 08:30:00",
+                total_documentos: 0,
+                total_bitacora: 1,
+                documentos: [],
+                bitacora: [
+                    { created_at: "2026-10-02 11:30:00", comentario: "Revisión de requerimientos visuales y logotipo corporativo VilcoSystem.", porcentaje: 15 }
+                ]
+            }
+        ];
+
+        // Carga Inicial de Datos
+        async function loadDashboardData() {
+            try {
+                const res = await fetch('/api/tareas');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.tareas && data.tareas.length > 0) {
+                        allTasks = data.tareas;
+                        document.getElementById('status-label').innerText = 'En Línea • Servidor Activo';
+                    } else {
+                        allTasks = FALLBACK_DATA;
+                    }
+                } else {
+                    allTasks = FALLBACK_DATA;
+                }
+            } catch (err) {
+                console.log('Modo independiente / API no disponible. Utilizando datos precargados:', err);
+                allTasks = FALLBACK_DATA;
+                document.getElementById('status-label').innerText = 'Modo Local / Standalone';
+            }
+
+            calculateMetricsAndRender();
+        }
+
+        // Cálculo de Métricas y Renderizado de Componentes
+        function calculateMetricsAndRender() {
+            const total = allTasks.length;
+            const completadas = allTasks.filter(t => t.estado === 'COMPLETADO');
+            const enCurso = allTasks.filter(t => t.estado !== 'COMPLETADO');
+            const criticas = enCurso.filter(t => t.criticidad === 'CRITICA' || t.prioridad === 'URGENTE');
+            const bloqueadas = allTasks.filter(t => t.estado === 'BLOQUEADO' || t.estado === 'REVISION');
+
+            const avgAvanceGlobal = total > 0 ? (allTasks.reduce((acc, t) => acc + (t.porcentaje_avance || 0), 0) / total).toFixed(1) : 0;
+            const avgAvanceActivas = enCurso.length > 0 ? (enCurso.reduce((acc, t) => acc + (t.porcentaje_avance || 0), 0) / enCurso.length).toFixed(1) : 0;
+            const cumplimientoRate = total > 0 ? ((completadas.length / total) * 100).toFixed(1) : 0;
+
+            // Actualizar tarjetas KPI
+            document.getElementById('kpi-total-val').innerText = total;
+            document.getElementById('kpi-total-sub').innerText = `${enCurso.length} activas • ${completadas.length} finalizadas`;
+
+            document.getElementById('kpi-completed-val').innerText = completadas.length;
+            document.getElementById('kpi-completed-rate').innerText = `${cumplimientoRate}% Cumplimiento`;
+
+            document.getElementById('kpi-inprogress-val').innerText = enCurso.length;
+            document.getElementById('kpi-active-avg').innerText = `Avance: ${avgAvanceActivas}%`;
+
+            document.getElementById('kpi-critical-val').innerText = criticas.length;
+
+            document.getElementById('kpi-global-avg').innerText = avgAvanceGlobal;
+            document.getElementById('kpi-global-progress').style.width = `${avgAvanceGlobal}%`;
+
+            // Actualizar conteos de pestañas
+            document.getElementById('tab-count-all').innerText = total;
+            document.getElementById('tab-count-en_curso').innerText = enCurso.length;
+            document.getElementById('tab-count-completado').innerText = completadas.length;
+            document.getElementById('tab-count-criticas').innerText = criticas.length;
+            document.getElementById('tab-count-bloqueado').innerText = bloqueadas.length;
+
+            document.getElementById('last-updated-text').innerText = 'Actualizado: ' + new Date().toLocaleTimeString('es-PE');
+
+            renderCharts();
+            applyFilters();
+        }
+
+        // Renderizado de Gráficos con Chart.js
+        function renderCharts() {
+            if (typeof Chart === 'undefined') return;
+
+            // 1. Chart Estado
+            const countsEstado = {
+                'Completado': allTasks.filter(t => t.estado === 'COMPLETADO').length,
+                'En Proceso': allTasks.filter(t => t.estado === 'EN_PROCESO').length,
+                'Pendiente': allTasks.filter(t => t.estado === 'PENDIENTE').length,
+                'En Revisión': allTasks.filter(t => t.estado === 'REVISION').length,
+                'Bloqueado': allTasks.filter(t => t.estado === 'BLOQUEADO').length,
+            };
+
+            const ctxStatus = document.getElementById('chartStatus');
+            if (ctxStatus) {
+                if (chartStatusInstance) chartStatusInstance.destroy();
+                chartStatusInstance = new Chart(ctxStatus, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(countsEstado),
+                        datasets: [{
+                            data: Object.values(countsEstado),
+                            backgroundColor: ['#10B981', '#06B6D4', '#F59E0B', '#8B5CF6', '#EF4444'],
+                            borderWidth: 0,
+                            hoverOffset: 6
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'right',
+                                labels: { color: '#9CA3AF', font: { size: 11 }, boxWidth: 12 }
+                            }
+                        },
+                        cutout: '68%'
+                    }
+                });
+            }
+
+            // 2. Chart Área
+            const countsArea = {};
+            allTasks.forEach(t => {
+                const a = t.area || 'OTRA';
+                countsArea[a] = (countsArea[a] || 0) + 1;
+            });
+
+            const ctxArea = document.getElementById('chartArea');
+            if (ctxArea) {
+                if (chartAreaInstance) chartAreaInstance.destroy();
+                chartAreaInstance = new Chart(ctxArea, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(countsArea),
+                        datasets: [{
+                            label: 'Tareas',
+                            data: Object.values(countsArea),
+                            backgroundColor: '#3B82F6',
+                            borderRadius: 6
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: { ticks: { color: '#9CA3AF', font: { size: 10 } }, grid: { display: false } },
+                            y: { ticks: { color: '#9CA3AF', stepSize: 1 }, grid: { color: 'rgba(255, 255, 255, 0.05)' } }
+                        },
+                        plugins: {
+                            legend: { display: false }
+                        }
+                    }
+                });
+            }
+
+            // 3. Chart Prioridad
+            const countsPrio = {
+                'Urgente': allTasks.filter(t => t.prioridad === 'URGENTE').length,
+                'Alta': allTasks.filter(t => t.prioridad === 'ALTA').length,
+                'Media': allTasks.filter(t => t.prioridad === 'MEDIA').length,
+                'Baja': allTasks.filter(t => t.prioridad === 'BAJA').length
+            };
+
+            const ctxPrio = document.getElementById('chartPriority');
+            if (ctxPrio) {
+                if (chartPriorityInstance) chartPriorityInstance.destroy();
+                chartPriorityInstance = new Chart(ctxPrio, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(countsPrio),
+                        datasets: [{
+                            label: 'Prioridad',
+                            data: Object.values(countsPrio),
+                            backgroundColor: ['#EF4444', '#F97316', '#3B82F6', '#6B7280'],
+                            borderRadius: 6
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: { ticks: { color: '#9CA3AF', stepSize: 1 }, grid: { color: 'rgba(255, 255, 255, 0.05)' } },
+                            y: { ticks: { color: '#9CA3AF', font: { size: 11 } }, grid: { display: false } }
+                        },
+                        plugins: {
+                            legend: { display: false }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Filtro y Búsqueda en Vivo
+        function applyFilters() {
+            const query = (document.getElementById('search-input').value || '').toLowerCase().trim();
+            const filterArea = document.getElementById('filter-area').value;
+            const filterEstado = document.getElementById('filter-estado').value;
+            const filterPrio = document.getElementById('filter-prioridad').value;
+
+            const filtered = allTasks.filter(t => {
+                // Filtro de Pestaña Rápida
+                if (activeTab === 'en_curso' && t.estado === 'COMPLETADO') return false;
+                if (activeTab === 'completado' && t.estado !== 'COMPLETADO') return false;
+                if (activeTab === 'criticas' && !(t.criticidad === 'CRITICA' || t.prioridad === 'URGENTE')) return false;
+                if (activeTab === 'bloqueado' && !(t.estado === 'BLOQUEADO' || t.estado === 'REVISION')) return false;
+
+                // Filtros de selectores
+                if (filterArea && t.area !== filterArea) return false;
+                if (filterEstado && t.estado !== filterEstado) return false;
+                if (filterPrio && t.prioridad !== filterPrio) return false;
+
+                // Búsqueda de texto
+                if (query) {
+                    const matchText = (
+                        (t.id || '') + ' ' +
+                        (t.titulo || '') + ' ' +
+                        (t.solicitante || '') + ' ' +
+                        (t.cargo_solicitante || '') + ' ' +
+                        (t.area || '') + ' ' +
+                        (t.descripcion || '') + ' ' +
+                        (t.bitacora ? t.bitacora.map(b => (b.comentario || '') + ' ' + (b.query_sql || '')).join(' ') : '')
+                    ).toLowerCase();
+                    if (!matchText.includes(query)) return false;
+                }
+
+                return true;
+            });
+
+            renderTasksList(filtered);
+        }
+
+        function setQuickTab(tab, btn) {
+            activeTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            applyFilters();
+        }
+
+        function setViewMode(mode) {
+            currentView = mode;
+            document.getElementById('btn-view-table').classList.toggle('active', mode === 'table');
+            document.getElementById('btn-view-cards').classList.toggle('active', mode === 'cards');
+            document.getElementById('view-table-wrapper').style.display = mode === 'table' ? 'block' : 'none';
+            document.getElementById('view-cards-wrapper').style.display = mode === 'cards' ? 'grid' : 'none';
+        }
+
+        // Renderizado del Listado de Tareas
+        function renderTasksList(tasks) {
+            const tableBody = document.getElementById('tasks-table-body');
+            const cardsGrid = document.getElementById('view-cards-wrapper');
+            const emptyState = document.getElementById('empty-state');
+
+            tableBody.innerHTML = '';
+            cardsGrid.innerHTML = '';
+
+            if (!tasks || tasks.length === 0) {
+                emptyState.style.display = 'block';
+                document.getElementById('view-table-wrapper').style.display = 'none';
+                cardsGrid.style.display = 'none';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            if (currentView === 'table') {
+                document.getElementById('view-table-wrapper').style.display = 'block';
+            } else {
+                cardsGrid.style.display = 'grid';
+            }
+
+            tasks.forEach(t => {
+                // Color de barra de avance
+                const p = t.porcentaje_avance || 0;
+                let pColor = '#3B82F6';
+                if (p === 100 || t.estado === 'COMPLETADO') pColor = '#10B981';
+                else if (p < 40) pColor = '#F59E0B';
+
+                // Clases de estado
+                const statusClass = `status-${(t.estado || 'PENDIENTE').toLowerCase()}`;
+                const prioClass = `prio-${(t.prioridad || 'MEDIA').toLowerCase()}`;
+
+                // Nivel Jerárquico
+                let jerarquiaLabel = '👤 Operativo';
+                if (t.cargo_solicitante === 'GERENTE_GENERAL' || (t.cargo_solicitante && t.cargo_solicitante.includes('GERENTE_GENERAL'))) jerarquiaLabel = '👑 Gerencia General';
+                else if (t.cargo_solicitante === 'SUBGERENTE' || (t.cargo_solicitante && t.cargo_solicitante.includes('SUBGERENTE'))) jerarquiaLabel = '⚡ Subgerente';
+                else if (t.cargo_solicitante === 'JEFE_AREA' || (t.cargo_solicitante && t.cargo_solicitante.includes('JEFE'))) jerarquiaLabel = '👔 Jefatura';
+                else if (t.cargo_solicitante === 'LIDER_TECNICO') jerarquiaLabel = '💻 Líder Técnico';
+
+                // 1. Fila de Tabla
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><span class="badge-id">${t.id}</span></td>
+                    <td class="task-title-cell">
+                        <div class="task-title">${escapeHTML(t.titulo)}</div>
+                        <div class="task-desc-snip">${escapeHTML(t.descripcion)}</div>
+                    </td>
+                    <td>
+                        <div style="font-weight: 600; color: var(--text-title);">${escapeHTML(t.solicitante)}</div>
+                        <div class="hierarchy-pill">${jerarquiaLabel}</div>
+                    </td>
+                    <td><span class="area-tag">${escapeHTML(t.area)}</span></td>
+                    <td>
+                        <span class="badge-priority ${prioClass}">${t.prioridad}</span>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Crit: ${t.criticidad}</div>
+                    </td>
+                    <td>
+                        <div class="progress-box">
+                            <div class="progress-track">
+                                <div class="progress-bar-inner" style="width: ${p}%; background: ${pColor};"></div>
+                            </div>
+                            <span class="progress-percent">${p}%</span>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge-status ${statusClass}">
+                            ● ${t.estado.replace('_', ' ')}
+                        </span>
+                    </td>
+                    <td style="text-align: center;">
+                        ${(t.total_documentos > 0 || (t.documentos && t.documentos.length > 0)) ? 
+                            `<span title="${t.total_documentos || t.documentos.length} archivo(s) adjunto(s)" style="cursor: pointer; color: var(--primary); font-weight: 600;">📎 ${t.total_documentos || t.documentos.length}</span>` : 
+                            '<span style="color: var(--text-muted);">-</span>'}
+                    </td>
+                    <td style="text-align: right;">
+                        <div class="actions-cell" style="justify-content: flex-end;">
+                            <button class="btn-action-view" onclick="openTaskDetail('${t.id}')">👁️ Detalle</button>
+                            <button class="btn-action-update" onclick="openUpdateModal('${t.id}')">✍️ Avance</button>
+                        </div>
+                    </td>
+                `;
+                tableBody.appendChild(tr);
+
+                // 2. Tarjeta Grid (para Vista Tarjetas)
+                const card = document.createElement('div');
+                card.className = 'task-card-item';
+                card.innerHTML = `
+                    <div>
+                        <div class="card-top">
+                            <span class="badge-id">${t.id}</span>
+                            <span class="badge-status ${statusClass}">● ${t.estado.replace('_', ' ')}</span>
+                        </div>
+                        <div class="card-title">${escapeHTML(t.titulo)}</div>
+                        <div class="card-desc">${escapeHTML(t.descripcion)}</div>
+                        <div style="display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap;">
+                            <span class="area-tag">${escapeHTML(t.area)}</span>
+                            <span class="badge-priority ${prioClass}">${t.prioridad}</span>
+                            <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.05); color: var(--text-muted);">Crit: ${t.criticidad}</span>
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">
+                            Solicita: <strong style="color: var(--text-title);">${escapeHTML(t.solicitante)}</strong> (${jerarquiaLabel})
+                        </div>
+                        <div class="progress-box" style="margin-bottom: 10px;">
+                            <div class="progress-track">
+                                <div class="progress-bar-inner" style="width: ${p}%; background: ${pColor};"></div>
+                            </div>
+                            <span class="progress-percent">${p}%</span>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span style="font-size: 11px; color: var(--text-muted);">
+                            ${t.fecha_limite ? '📅 Límite: ' + t.fecha_limite : 'Bitácora: ' + (t.total_bitacora || 0) + ' hitos'}
+                        </span>
+                        <div style="display: flex; gap: 6px;">
+                            <button class="btn-action-view" onclick="openTaskDetail('${t.id}')">Detalle</button>
+                            <button class="btn-action-update" onclick="openUpdateModal('${t.id}')">Avance</button>
+                        </div>
+                    </div>
+                `;
+                cardsGrid.appendChild(card);
+            });
+        }
+
+        // Modal Detalle
+        function openTaskDetail(taskId) {
+            const task = allTasks.find(t => t.id === taskId);
+            if (!task) return;
+
+            document.getElementById('detail-code').innerText = task.id;
+            document.getElementById('detail-title').innerText = task.titulo;
+            document.getElementById('detail-solicitante').innerText = task.solicitante;
+            document.getElementById('detail-area-cargo').innerText = `${task.area} • ${task.cargo_solicitante}`;
+            document.getElementById('detail-status-avance').innerHTML = `
+                <span class="badge-status status-${task.estado.toLowerCase()}">● ${task.estado.replace('_', ' ')}</span>
+                <span style="margin-left: 8px; font-weight: 700;">${task.porcentaje_avance || 0}%</span>
+            `;
+            document.getElementById('detail-priority-crit').innerText = `${task.prioridad} / ${task.criticidad}`;
+            document.getElementById('detail-created').innerText = task.created_at || 'No registrada';
+            document.getElementById('detail-deadline').innerText = task.fecha_limite || 'Sin fecha fija';
+            document.getElementById('detail-description').innerText = task.descripcion || 'Sin descripción adicional.';
+            document.getElementById('detail-ai-justification').innerText = task.justificacion_ia || 'Sin justificación registrada.';
+
+            // Documentos
+            const docsList = document.getElementById('detail-docs-list');
+            docsList.innerHTML = '';
+            const docs = task.documentos || [];
+            document.getElementById('detail-docs-count').innerText = docs.length;
+
+            if (docs.length === 0) {
+                docsList.innerHTML = '<div style="font-size: 12px; color: var(--text-muted);">No hay documentos adjuntos indexados para este pedido.</div>';
+            } else {
+                docs.forEach((d, idx) => {
+                    const dDiv = document.createElement('div');
+                    dDiv.style.cssText = 'background: var(--bg-main); border: 1px solid var(--border-subtle); padding: 10px 14px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;';
+                    dDiv.innerHTML = `
+                        <div>
+                            <strong style="color: var(--primary);">📎 ${escapeHTML(d.nombre_archivo)}</strong>
+                            <span style="font-size: 11px; color: var(--text-muted); margin-left: 8px;">(${d.tipo_archivo} • ${(d.tamano_bytes / 1024).toFixed(1)} KB)</span>
+                            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">${escapeHTML(d.resumen || '')}</div>
+                        </div>
+                    `;
+                    docsList.appendChild(dDiv);
+                });
+            }
+
+            // Timeline
+            const tlContainer = document.getElementById('detail-timeline');
+            tlContainer.innerHTML = '';
+            const bitacora = task.bitacora || [];
+
+            if (bitacora.length === 0) {
+                tlContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-muted);">Aún no se han registrado hitos en la bitácora de esta tarea.</div>';
+            } else {
+                bitacora.forEach(b => {
+                    const tItem = document.createElement('div');
+                    tItem.className = 'timeline-item';
+                    
+                    let sqlHtml = '';
+                    if (b.query_sql) {
+                        sqlHtml = `
+                            <div class="sql-snippet">
+                                <button class="copy-sql-btn" onclick="copyToClipboard('${escapeJS(b.query_sql)}')">Copiar SQL</button>
+                                <code>${escapeHTML(b.query_sql)}</code>
+                            </div>
+                        `;
+                    }
+
+                    tItem.innerHTML = `
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-date">${b.created_at || ''} ${b.porcentaje ? '• Avance: ' + b.porcentaje + '%' : ''}</div>
+                        <div class="timeline-text">
+                            ${escapeHTML(b.comentario)}
+                            ${sqlHtml}
+                            ${b.doc_referencia ? '<div style="margin-top: 6px; font-size: 11px; color: var(--primary);">📄 Ref: ' + escapeHTML(b.doc_referencia) + '</div>' : ''}
+                        </div>
+                    `;
+                    tlContainer.appendChild(tItem);
+                });
+            }
+
+            selectedTaskForUpdate = task;
+            openModal('modal-detail');
+        }
+
+        // Modal de Actualización de Avance
+        function openUpdateModal(taskId) {
+            const task = allTasks.find(t => t.id === taskId);
+            if (!task) return;
+
+            selectedTaskForUpdate = task;
+            document.getElementById('update-modal-task-id').innerText = task.id;
+            document.getElementById('update-modal-task-title').innerText = task.titulo;
+            document.getElementById('update-estado').value = task.estado;
+            document.getElementById('update-percent').value = task.porcentaje_avance || 0;
+            document.getElementById('update-percent-val').innerText = (task.porcentaje_avance || 0) + '%';
+            document.getElementById('update-comment').value = '';
+            document.getElementById('update-sql').value = '';
+            document.getElementById('update-doc-ref').value = '';
+
+            openModal('modal-update');
+        }
+
+        function openQuickUpdateFromDetail() {
+            closeModal('modal-detail');
+            if (selectedTaskForUpdate) {
+                openUpdateModal(selectedTaskForUpdate.id);
+            }
+        }
+
+        async function submitTaskUpdate() {
+            if (!selectedTaskForUpdate) return;
+
+            const estado = document.getElementById('update-estado').value;
+            const porcentaje = parseInt(document.getElementById('update-percent').value);
+            const comentario = document.getElementById('update-comment').value.trim();
+            const querySql = document.getElementById('update-sql').value.trim();
+            const docRef = document.getElementById('update-doc-ref').value.trim();
+
+            if (!comentario) {
+                alert('Por favor escribe un comentario o nota de avance para la bitácora.');
+                return;
+            }
+
+            try {
+                const payload = {
+                    tarea_id: selectedTaskForUpdate.id,
+                    comentario: comentario,
+                    nuevo_estado: estado,
+                    porcentaje: porcentaje,
+                    query_sql: querySql || null,
+                    doc_referencia: docRef || null
+                };
+
+                const res = await fetch('/api/actualizar_avance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (res.ok) {
+                    alert('✅ Avance registrado en la base de datos.');
+                }
+            } catch (err) {
+                console.log('Guardado localmente en sesión:', err);
+            }
+
+            // Actualización optimista local
+            selectedTaskForUpdate.estado = estado;
+            selectedTaskForUpdate.porcentaje_avance = porcentaje;
+            if (!selectedTaskForUpdate.bitacora) selectedTaskForUpdate.bitacora = [];
+            selectedTaskForUpdate.bitacora.push({
+                created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                comentario: comentario,
+                porcentaje: porcentaje,
+                query_sql: querySql || null,
+                doc_referencia: docRef || null
+            });
+            selectedTaskForUpdate.total_bitacora = selectedTaskForUpdate.bitacora.length;
+
+            closeModal('modal-update');
+            calculateMetricsAndRender();
+        }
+
+        // Modal Nueva Solicitud
+        function openNewTaskModal() {
+            document.getElementById('new-titulo').value = '';
+            document.getElementById('new-solicitante').value = 'Cristian Villa';
+            document.getElementById('new-cargo').value = 'SUBGERENTE';
+            document.getElementById('new-area').value = 'OPERACIONES';
+            document.getElementById('new-prioridad').value = 'ALTA';
+            document.getElementById('new-criticidad').value = 'ALTA';
+            document.getElementById('new-descripcion').value = '';
+            document.getElementById('new-fecha-limite').value = '';
+
+            openModal('modal-new-task');
+        }
+
+        async function submitNewTask() {
+            const titulo = document.getElementById('new-titulo').value.trim();
+            const solicitante = document.getElementById('new-solicitante').value.trim();
+            const cargo = document.getElementById('new-cargo').value;
+            const area = document.getElementById('new-area').value;
+            const prioridad = document.getElementById('new-prioridad').value;
+            const criticidad = document.getElementById('new-criticidad').value;
+            const descripcion = document.getElementById('new-descripcion').value.trim();
+            const fechaLimite = document.getElementById('new-fecha-limite').value;
+
+            if (!titulo || !solicitante || !descripcion) {
+                alert('Por favor completa los campos requeridos: Título, Solicitante y Descripción.');
+                return;
+            }
+
+            const nextNum = allTasks.length + 1;
+            const newId = 'REQ-' + String(nextNum).padStart(3, '0');
+
+            const newTaskObj = {
+                id: newId,
+                titulo: titulo,
+                solicitante: solicitante,
+                cargo_solicitante: cargo,
+                area: area,
+                descripcion: descripcion,
+                prioridad: prioridad,
+                criticidad: criticidad,
+                justificacion_ia: 'Registrado directamente por Cristian Villa desde el Portal Operativo de VilcoSystem.',
+                estado: 'EN_PROCESO',
+                porcentaje_avance: 10,
+                fecha_limite: fechaLimite || null,
+                created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                total_documentos: 0,
+                total_bitacora: 1,
+                documentos: [],
+                bitacora: [
+                    { created_at: new Date().toISOString().replace('T', ' ').substring(0, 19), comentario: 'Solicitud creada en el portal.', porcentaje: 10 }
+                ]
+            };
+
+            try {
+                await fetch('/api/crear_solicitud', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newTaskObj)
+                });
+            } catch (err) {
+                console.log('Creación local:', err);
+            }
+
+            allTasks.unshift(newTaskObj);
+            closeModal('modal-new-task');
+            calculateMetricsAndRender();
+            alert(`✅ Solicitud ${newId} registrada con éxito.`);
+        }
+
+        // Exportación a CSV
+        function exportToCSV() {
+            if (!allTasks || allTasks.length === 0) return;
+
+            const headers = ["ID", "Título", "Solicitante", "Cargo", "Área", "Prioridad", "Criticidad", "Estado", "Avance (%)", "Fecha Registro", "Fecha Límite", "Último Hito Bitácora"];
+            const rows = allTasks.map(t => {
+                const ultBitacora = (t.bitacora && t.bitacora.length > 0) ? t.bitacora[t.bitacora.length - 1].comentario : '';
+                return [
+                    t.id,
+                    `"${(t.titulo || '').replace(/"/g, '""')}"`,
+                    `"${(t.solicitante || '').replace(/"/g, '""')}"`,
+                    t.cargo_solicitante || '',
+                    t.area || '',
+                    t.prioridad || '',
+                    t.criticidad || '',
+                    t.estado || '',
+                    t.porcentaje_avance || 0,
+                    t.created_at || '',
+                    t.fecha_limite || '',
+                    `"${ultBitacora.replace(/"/g, '""')}"`
+                ];
+            });
+
+            const csvContent = "﻿" + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `Reporte_Tareas_VilcoSystem_${new Date().toISOString().substring(0,10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Helpers de Modal
+        function openModal(id) {
+            document.getElementById(id).classList.add('active');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Consulta SQL copiada al portapapeles');
+            });
+        }
+
+        function escapeHTML(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function escapeJS(str) {
+            if (!str) return '';
+            return String(str).replace(/'/g, "\'").replace(/"/g, '\"').replace(/\n/g, ' ');
+        }
+
+        // Iniciar al cargar la ventana
+        window.addEventListener('DOMContentLoaded', () => {
+            loadDashboardData();
+        });
+    </script>
+</body>
+</html>
