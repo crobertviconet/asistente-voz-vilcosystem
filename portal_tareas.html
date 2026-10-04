@@ -1360,9 +1360,12 @@
                     <span class="kpi-icon">📈</span>
                 </div>
                 <div class="kpi-value">
-                    <span id="kpi-global-avg">0</span><span style="font-size: 18px; color: var(--text-muted);">%</span>
+                    <span id="kpi-global-avg">0.0</span><span style="font-size: 18px; color: var(--text-muted);">%</span>
                 </div>
-                <div class="kpi-progress-bar">
+                <div class="kpi-sub" id="kpi-global-sub">
+                    <span class="badge-blue" id="kpi-global-badge">Promedio global</span> ponderado total
+                </div>
+                <div class="kpi-progress-bar" style="margin-top: 8px;">
                     <div class="kpi-progress-fill" id="kpi-global-progress" style="width: 0%;"></div>
                 </div>
             </div>
@@ -1960,7 +1963,13 @@
                 if (res.ok) {
                     const data = await res.json();
                     if (data && data.status === 'success') {
-                        allTasks = data.tareas || [];
+                        allTasks = (data.tareas || []).map(t => {
+                            let p = parseFloat(t.porcentaje_avance);
+                            if (isNaN(p)) p = 0;
+                            if (t.estado === 'COMPLETADO' && p === 0) p = 100;
+                            p = Math.max(0, Math.min(100, Math.round(p)));
+                            return { ...t, porcentaje_avance: p };
+                        });
                         if (banner) banner.style.display = 'none';
                         if (dbSourceInfo.modo_produccion) {
                             statusLabel.innerText = '🟢 Conectado a Turso Cloud (' + allTasks.length + ' tareas)';
@@ -1993,9 +2002,19 @@
             const criticas = enCurso.filter(t => t.criticidad === 'CRITICA' || t.prioridad === 'URGENTE');
             const bloqueadas = allTasks.filter(t => t.estado === 'BLOQUEADO' || t.estado === 'REVISION');
 
-            const avgAvanceGlobal = total > 0 ? (allTasks.reduce((acc, t) => acc + (t.porcentaje_avance || 0), 0) / total).toFixed(1) : 0;
-            const avgAvanceActivas = enCurso.length > 0 ? (enCurso.reduce((acc, t) => acc + (t.porcentaje_avance || 0), 0) / enCurso.length).toFixed(1) : 0;
-            const cumplimientoRate = total > 0 ? ((completadas.length / total) * 100).toFixed(1) : 0;
+            const parseAvance = (t) => {
+                let p = parseFloat(t.porcentaje_avance);
+                if (isNaN(p)) p = 0;
+                if (t.estado === 'COMPLETADO' && p === 0) p = 100;
+                return Math.max(0, Math.min(100, p));
+            };
+
+            const sumGlobal = allTasks.reduce((acc, t) => acc + parseAvance(t), 0);
+            const sumActivas = enCurso.reduce((acc, t) => acc + parseAvance(t), 0);
+
+            const avgAvanceGlobal = total > 0 ? (sumGlobal / total).toFixed(1) : '0.0';
+            const avgAvanceActivas = enCurso.length > 0 ? (sumActivas / enCurso.length).toFixed(1) : '0.0';
+            const cumplimientoRate = total > 0 ? ((completadas.length / total) * 100).toFixed(1) : '0.0';
 
             // Actualizar tarjetas KPI
             document.getElementById('kpi-total-val').innerText = total;
@@ -2010,7 +2029,7 @@
             document.getElementById('kpi-critical-val').innerText = criticas.length;
 
             document.getElementById('kpi-global-avg').innerText = avgAvanceGlobal;
-            document.getElementById('kpi-global-progress').style.width = `${avgAvanceGlobal}%`;
+            document.getElementById('kpi-global-progress').style.width = `${Math.min(100, Math.max(0, parseFloat(avgAvanceGlobal)))}%`;
 
             // Actualizar conteos de pestañas
             document.getElementById('tab-count-all').innerText = total;

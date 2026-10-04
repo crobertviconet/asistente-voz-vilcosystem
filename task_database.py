@@ -492,6 +492,14 @@ def obtener_tarea_por_id(tarea_id: str) -> Optional[Dict[str, Any]]:
         if not row:
             return None
         t = dict(row)
+        try:
+            p_val = int(float(t.get("porcentaje_avance") if t.get("porcentaje_avance") is not None else 0))
+            if t.get("estado") == "COMPLETADO" and p_val == 0:
+                p_val = 100
+            t["porcentaje_avance"] = max(0, min(100, p_val))
+        except (ValueError, TypeError):
+            t["porcentaje_avance"] = 100 if t.get("estado") == "COMPLETADO" else 0
+
         b_rows = conn.execute(
             "SELECT * FROM bitacora_avance WHERE tarea_id = ? ORDER BY id ASC;",
             (tarea_id,)
@@ -632,7 +640,15 @@ def obtener_todas_las_tareas() -> List[Dict[str, Any]]:
             t.setdefault("prioridad", "MEDIA")
             t.setdefault("criticidad", "MODERADA")
             t.setdefault("estado", "PENDIENTE")
-            t.setdefault("porcentaje_avance", 0)
+            
+            # Normalización numérica estricta de porcentaje_avance
+            try:
+                p_val = int(float(t.get("porcentaje_avance") if t.get("porcentaje_avance") is not None else 0))
+                if t.get("estado") == "COMPLETADO" and p_val == 0:
+                    p_val = 100
+                t["porcentaje_avance"] = max(0, min(100, p_val))
+            except (ValueError, TypeError):
+                t["porcentaje_avance"] = 100 if t.get("estado") == "COMPLETADO" else 0
 
             # Subconsulta bitácora defensiva
             try:
@@ -670,8 +686,8 @@ def obtener_metricas_dashboard() -> Dict[str, Any]:
     bloqueadas = [t for t in tareas if t.get("estado") == "BLOQUEADO"]
     criticas_activas = [t for t in en_curso if t.get("criticidad") in ("CRITICA", "ALTA") or t.get("prioridad") == "URGENTE"]
     
-    avg_avance = sum(t.get("porcentaje_avance", 0) for t in tareas) / total if total > 0 else 0
-    avg_avance_activas = sum(t.get("porcentaje_avance", 0) for t in en_curso) / len(en_curso) if en_curso else 0
+    avg_avance = sum(int(float(t.get("porcentaje_avance") or 0)) for t in tareas) / total if total > 0 else 0.0
+    avg_avance_activas = sum(int(float(t.get("porcentaje_avance") or 0)) for t in en_curso) / len(en_curso) if en_curso else 0.0
     
     por_estado = {}
     for t in tareas:
