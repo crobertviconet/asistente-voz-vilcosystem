@@ -3053,6 +3053,32 @@
             }
         }
 
+    
+        async function checkTelegramBotStatus() {
+            const resultDiv = document.getElementById('telegram-status-result');
+            resultDiv.style.color = '#f59e0b';
+            resultDiv.innerText = 'Consultando estado del bot en el servidor...';
+
+            const apiBase = getEffectiveApiBaseUrl();
+            const endpoint = (apiBase || '') + '/api/telegram/status';
+
+            try {
+                const res = await fetch(endpoint);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    resultDiv.style.color = '#10b981';
+                    resultDiv.innerHTML = `✅ <strong>Bot Activo:</strong> ${data.message} (Bot ID: ${data.bot_id || 'OK'}).<br><span style="color:#94a3b8;font-size:11px;">Si no responde en tu chat, envía <code>/start</code> para reiniciar la conversación.</span>`;
+                } else {
+                    resultDiv.style.color = '#ef4444';
+                    resultDiv.innerText = `❌ Error: ${data.message}`;
+                }
+            } catch (e) {
+                resultDiv.style.color = '#ef4444';
+                resultDiv.innerHTML = `❌ No se pudo conectar al servidor: ${e.message}. Asegúrate de que el servicio en Render esté 'Live'.`;
+            }
+        }
+
     </script>
 
     <!-- Modal de Conexión de Datos (Render / Local / Turso Directo) -->
@@ -3118,6 +3144,19 @@
 
                 <div id="conn-status-msg" style="margin-top: 15px; font-size: 13px; font-weight: 500; display: none;"></div>
             </div>
+                            <!-- Sección de Diagnóstico del Bot de Telegram -->
+                <div style="margin-top: 20px; padding: 14px; background: rgba(30, 41, 59, 0.6); border: 1px solid var(--border-color); border-radius: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 13px; color: #38bdf8;">🤖 Estado del Bot de Telegram (AsistenteTareas):</span>
+                        <button class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="checkTelegramBotStatus()">
+                            🔍 Diagnosticar Bot
+                        </button>
+                    </div>
+                    <div id="telegram-status-result" style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+                        Haz clic en "Diagnosticar Bot" para comprobar si el servidor está conectado a Telegram o si existe algún conflicto de instancias.
+                    </div>
+                </div>
+
             <div class="modal-footer" style="padding: 16px 24px; display: flex; justify-content: space-between;">
                 <button class="btn btn-outline" onclick="resetConnectionConfig()">Restablecer</button>
                 <div style="display: flex; gap: 10px;">

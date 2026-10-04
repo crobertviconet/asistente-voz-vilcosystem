@@ -104,6 +104,21 @@ class VilcoPortalServerHandler(BaseHTTPRequestHandler):
             self.wfile.write(resp.encode("utf-8"))
             return
 
+        elif path == "/api/telegram/status":
+            token = os.getenv("TELEGRAM_BOT_TOKEN")
+            resp = {
+                "status": "ok" if token else "error",
+                "telegram_configured": bool(token),
+                "bot_id": token.split(":")[0] if token and ":" in token else None,
+                "message": "Servicio de Telegram activo en polling continuo con auto-restart." if token else "Falta configurar TELEGRAM_BOT_TOKEN"
+            }
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(resp).encode("utf-8"))
+            return
+
         elif path in ("/api/fuente", "/api/database"):
             try:
                 info = task_database.obtener_info_fuente_datos()
@@ -971,8 +986,41 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await message.reply_text(f"⚠️ Error al indexar documento: {e}", reply_to_message_id=message.message_id)
 
 
+def run_telegram_bot_loop(token: str) -> None:
+    """
+    Bucle de polling resiliente con reconexión automática ante excepciones de red
+    o conflictos temporales entre contenedores de Render.
+    """
+    reconnect_delay = 3
+    while True:
+        try:
+            logger.info("Iniciando servicio de Telegram Bot y polling...")
+            app = ApplicationBuilder().token(token).build()
+            app.add_handler(CommandHandler("start", start_command))
+            app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
+            app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+            app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
+
+            # bootstrap_retries=-1 reintenta indefinidamente ante fallas transitorias de red
+            app.run_polling(
+                drop_pending_updates=False,
+                timeout=20,
+                bootstrap_retries=-1
+            )
+            logger.warning("Polling de Telegram finalizado. Reiniciando en 3 segundos...")
+            time.sleep(reconnect_delay)
+        except Exception as e_poll:
+            err_str = str(e_poll)
+            if "Conflict" in err_str:
+                logger.warning(f"Conflicto de polling en Telegram ({err_str[:100]}). Posible instancia previa apagándose. Reintentando en 8s...")
+                time.sleep(8)
+            else:
+                logger.error(f"Error en polling de Telegram: {e_poll}. Reintentando en 5s...")
+                time.sleep(5)
+
+
 def main() -> None:
-    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (v11.0.2 Auto-Discovery)...")
+    logger.info("Iniciando Asistente Decisional y Documental VilcoSystem (v11.0.4 Auto-Restart)...")
     # 1. Iniciar Servidor Web & Portal Operativo prioritariamente para Render
     http_thread = threading.Thread(target=start_health_server, args=(PORT,), daemon=True)
     http_thread.start()
@@ -995,21 +1043,8 @@ def main() -> None:
     get_gemini_client()
     discover_active_models()
 
-    # 4. Iniciar Bot de Telegram
-    app = ApplicationBuilder().token(token).build()
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
-
-    logger.info("Polling de Telegram iniciado. Escuchando eventos...")
-    try:
-        app.run_polling(drop_pending_updates=True)
-    except Exception as e_poll:
-        logger.warning(f"Aviso en polling de Telegram: {e_poll}. Manteniendo servidor HTTP activo.")
-        # Mantener el hilo principal vivo si run_polling finaliza
-        while True:
-            time.sleep(10)
+    # 4. Iniciar bucle de Telegram con auto-recuperación
+    run_telegram_bot_loop(token)
 
 
 if __name__ == "__main__":
