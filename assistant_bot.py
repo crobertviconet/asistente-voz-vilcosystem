@@ -87,21 +87,12 @@ class VilcoPortalServerHandler(BaseHTTPRequestHandler):
                 self.wfile.write(msg)
                 return
 
-        elif path == "/health":
+        elif path in ("/health", "/ping"):
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self._send_cors_headers()
             self.end_headers()
-            info_db = task_database.obtener_info_fuente_datos()
-            resp = json.dumps({
-                "status": "ok",
-                "app": "VilcoVoiceAssistant",
-                "portal": "enabled",
-                "database_engine": info_db.get("motor"),
-                "database_source": info_db.get("fuente"),
-                "database_tables": info_db.get("tablas")
-            })
-            self.wfile.write(resp.encode("utf-8"))
+            self.wfile.write(b"{\"status\":\"ok\",\"ping\":\"pong\"}")
             return
 
         elif path == "/api/telegram/status":
@@ -380,6 +371,7 @@ def get_gemini_client(api_key: Optional[str] = None):
 # Descubrimiento Dinámico de Modelos Activos (Auto-Discovery)
 # =============================================================================
 DEFAULT_FALLBACK_MODELS = [
+    "gemini-3-flash-preview",
     "gemini-3.8-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-pro-preview",
@@ -390,18 +382,22 @@ ACTIVE_MODELS_CACHE: List[str] = []
 
 
 def rank_model(name: str) -> int:
-    """Prioriza modelos rápidos (Flash 3.8/3.5) y luego modelos de alta capacidad (Pro)."""
+    """Prioriza modelos rápidos y compatibles con audio/conversación."""
     n = name.lower()
-    if "3.8-flash" in n:
+    if any(x in n for x in ["tts", "embedding", "imagen", "veo", "lyria", "robotics"]):
+        return 999
+    if "3-flash-preview" in n:
         return 1
-    if "flash" in n and "3" in n:
+    if "3.8-flash" in n:
         return 2
-    if "3.1-pro" in n or "3-pro" in n:
+    if "flash" in n and "3" in n:
         return 3
-    if "2.5-pro" in n:
+    if "3.1-pro" in n or "3-pro" in n:
         return 4
-    if "flash" in n:
+    if "2.5-pro" in n:
         return 5
+    if "flash" in n:
+        return 6
     return 10
 
 
@@ -419,8 +415,10 @@ def discover_active_models() -> List[str]:
             return DEFAULT_FALLBACK_MODELS
         for m in client.models.list():
             m_name = m.name.replace("models/", "")
-            # Descartar modelos de embedding, imagen pura o experimentales no conversacionales
-            if "gemini" in m_name and not any(x in m_name for x in ["embedding", "imagen", "veo", "lyria"]):
+            # Descartar modelos de TTS (solo salida de voz), embedding, imagen o video
+            if any(x in m_name.lower() for x in ["tts", "embedding", "imagen", "veo", "lyria", "robotics", "whisper"]):
+                continue
+            if "gemini" in m_name:
                 # Descartar versiones retiradas que sabemos que dan 404
                 if not any(deprecated in m_name for deprecated in ["2.0-flash", "2.5-flash", "1.5-flash"]):
                     available.append(m_name)
@@ -691,8 +689,8 @@ def _generate_with_fallback(
     last_error = None
 
     for model_name in models_to_try:
-        # Hasta 3 reintentos con backoff progresivo (1.5s, 3.0s)
-        for attempt in range(3):
+        # Hasta 2 intentos
+        for attempt in range(2):
             try:
                 logger.info(f"Llamando a Gemini con modelo '{model_name}' (intento {attempt + 1})...")
                 response = client.models.generate_content(
@@ -705,18 +703,25 @@ def _generate_with_fallback(
             except Exception as e:
                 err_str = str(e)
                 last_error = e
-                logger.warning(f"Error con modelo '{model_name}' (intento {attempt + 1}): {err_str[:120]}")
+                logger.warning(f"Aviso con modelo '{model_name}' (intento {attempt + 1}): {err_str[:120]}")
 
-                # Si el modelo no existe o está retirado (404), pasar de inmediato al siguiente
-                if "404" in err_str or "NOT_FOUND" in err_str:
+                # Si el modelo no existe (404) o no soporta modalidad de audio (400), conmutar de inmediato
+                if any(k in err_str for k in ["404", "NOT_FOUND", "400", "INVALID_ARGUMENT", "Audio input"]):
                     break
 
-                # Si es sobrecarga temporal (503 UNAVAILABLE) o cuota (429), pausar antes de reintentar
-                if "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str:
-                    sleep_time = 1.5 * (attempt + 1)
-                    logger.info(f"Pausa defensiva de {sleep_time}s por alta demanda...")
-                    time.sleep(sleep_time)
-                    continue
+                # Si es cuota agotada (429 RESOURCE_EXHAUSTED), conmutar de inmediato al siguiente modelo sin pausas largas
+                if "quota" in err_str.lower() or "resource_exhausted" in err_str.lower() or "429" in err_str:
+                    logger.info(f"Cuota agotada en '{model_name}'. Conmutando de inmediato al siguiente modelo...")
+                    break
+
+                # Si es saturación transitoria del servidor (503 UNAVAILABLE), breve pausa antes de 1 reintento
+                if "503" in err_str or "UNAVAILABLE" in err_str:
+                    if attempt == 0:
+                        logger.info("Pausa breve de 1.0s por congestión transitoria...")
+                        time.sleep(1.0)
+                        continue
+                    else:
+                        break
                 else:
                     break
 
